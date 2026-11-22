@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import {
   ShieldCheck,
-  Lock,
   KeyRound,
   AlertCircle,
   X,
   CheckCircle2,
-  Globe,
   QrCode,
-  UserPlus
+  UserPlus,
+  Eye,
+  EyeOff,
+  Languages,
+  ArrowLeft,
+  Mail
 } from 'lucide-react';
 import { Session, StaffRole, StaffUser } from '../../types';
 import { hashPinWithSalt, isKnownWeakPin, saveSession, validateProductionPin } from '../../services/security';
@@ -21,6 +24,9 @@ interface LoginModalProps {
   staffUsers: StaffUser[];
   currentSession: Session | null;
   lang: Language;
+  businessName?: string;
+  businessLogoUrl?: string;
+  onLanguageChange?: (lang: Language) => void;
   onLoginSuccess: (session: Session) => void;
   onClose?: () => void;
   isMandatory?: boolean;
@@ -29,6 +35,12 @@ interface LoginModalProps {
   isGoogleAuthLoading?: boolean;
   cloudAuthError?: string | null;
   onGoogleSignIn?: () => Promise<void> | void;
+  onEmailPasswordSignIn?: (
+    email: string,
+    password: string,
+    rememberMe: boolean
+  ) => Promise<{ success: boolean; error?: string; message?: string }>;
+  onSendPasswordReset?: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   onRotateStaffPin?: (staffId: string, newPin: string) => Promise<StaffUser | null> | void;
   onAcceptInviteCode?: (params: {
     inviteCode: string;
@@ -43,8 +55,10 @@ interface LoginModalProps {
 export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   staffUsers,
-  currentSession,
   lang,
+  businessName = 'Himalayan Breeze',
+  businessLogoUrl,
+  onLanguageChange,
   onLoginSuccess,
   onClose,
   isMandatory = false,
@@ -53,6 +67,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isGoogleAuthLoading = false,
   cloudAuthError = null,
   onGoogleSignIn,
+  onEmailPasswordSignIn,
+  onSendPasswordReset,
   onRotateStaffPin,
   onAcceptInviteCode,
   onOpenDownloadPortal,
@@ -63,9 +79,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       ? (new URLSearchParams(window.location.search).get('invite') || '').trim().toUpperCase()
       : '';
   const activeStaffUsers = staffUsers.filter((s) => s.isActive !== false);
-  const [loginMode, setLoginMode] = useState<'signin' | 'invite'>(() =>
-    initialInviteParam ? 'invite' : 'signin'
+
+  const [loginMode, setLoginMode] = useState<'email' | 'pin' | 'invite' | 'forgot'>(() =>
+    initialInviteParam ? 'invite' : 'email'
   );
+
+  // Email / Password state
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [isEmailLoading, setIsEmailLoading] = useState(false);
+  const [resetEmailInput, setResetEmailInput] = useState('');
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [infoMsg, setInfoMsg] = useState('');
+
+  // Staff PIN state
   const [selectedStaffId, setSelectedStaffId] = useState<string>(
     activeStaffUsers[0]?.id || staffUsers[0]?.id || ''
   );
@@ -74,10 +103,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [showDemoPins, setShowDemoPins] = useState(false);
+
+  // Mandatory PIN rotation state
   const [pendingRotationStaff, setPendingRotationStaff] = useState<StaffUser | null>(null);
   const [rotationNewPin, setRotationNewPin] = useState('');
   const [rotationConfirmPin, setRotationConfirmPin] = useState('');
   const [isRotatingPin, setIsRotatingPin] = useState(false);
+
+  // Invite code activation state
   const [inviteCodeInput, setInviteCodeInput] = useState(initialInviteParam);
   const [inviteFullName, setInviteFullName] = useState('');
   const [inviteUsername, setInviteUsername] = useState('');
@@ -107,26 +140,108 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     typeof navigator !== 'undefined' &&
     /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(navigator.userAgent || '');
 
+  const switchMode = (next: 'email' | 'pin' | 'invite' | 'forgot') => {
+    setLoginMode(next);
+    setErrorMsg('');
+    setInfoMsg('');
+    if (next === 'forgot' && !resetEmailInput && emailInput) {
+      setResetEmailInput(emailInput);
+    }
+  };
+
   const handleKeypadPress = (val: string) => {
     if (pin.length < 6) {
-      setPin(prev => prev + val);
+      setPin((prev) => prev + val);
       setErrorMsg('');
     }
   };
 
   const handleBackspace = () => {
-    setPin(prev => prev.slice(0, -1));
+    setPin((prev) => prev.slice(0, -1));
     setErrorMsg('');
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleEmailLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = emailInput.trim();
+    if (!cleanEmail || !passwordInput) {
+      setErrorMsg(
+        lang === 'ne'
+          ? 'कृपया Email ID र Password प्रविष्ट गर्नुहोस्।'
+          : 'Please enter your Email ID and Password.'
+      );
+      return;
+    }
+    if (!onEmailPasswordSignIn) {
+      setErrorMsg(
+        lang === 'ne'
+          ? 'इमेल लग-इन उपलब्ध छैन। कृपया Google वा Staff PIN प्रयोग गर्नुहोस्।'
+          : 'Email sign-in is unavailable. Please use Google Sign-In or Staff PIN.'
+      );
+      return;
+    }
+
+    setIsEmailLoading(true);
+    setErrorMsg('');
+    setInfoMsg('');
+    try {
+      const res = await onEmailPasswordSignIn(cleanEmail, passwordInput, rememberMe);
+      if (res.success) {
+        if (res.message) setInfoMsg(res.message);
+        setPasswordInput('');
+      } else if (res.error) {
+        setErrorMsg(res.error);
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Sign in failed. Please try again.');
+    } finally {
+      setIsEmailLoading(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = resetEmailInput.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMsg(
+        lang === 'ne'
+          ? 'कृपया सही Email ID प्रविष्ट गर्नुहोस्।'
+          : 'Please enter a valid Email ID.'
+      );
+      return;
+    }
+    if (!onSendPasswordReset) return;
+
+    setIsSendingReset(true);
+    setErrorMsg('');
+    setInfoMsg('');
+    try {
+      const res = await onSendPasswordReset(cleanEmail);
+      if (res.success) {
+        setInfoMsg(
+          res.message ||
+            (lang === 'ne'
+              ? `पासवर्ड रिसेट लिंक ${cleanEmail} मा पठाइयो। कृपया इमेल जाँच गर्नुहोस्।`
+              : `Password reset link sent to ${cleanEmail}. Check your inbox.`)
+        );
+      } else {
+        setErrorMsg(res.error || 'Could not send password reset email.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to send reset link.');
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  const handlePinSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     if (ownerControlLocked && !trimmedIdentifier) {
       setErrorMsg(
         lang === 'ne'
-          ? 'कृपया Admin ले दिएको Username वा Email प्रविष्ट गर्नुहोस्।'
-          : 'Please enter your Admin-assigned Username or Email.'
+          ? 'कृपया Admin वा Manager ले दिएको Username वा Email प्रविष्ट गर्नुहोस्।'
+          : 'Please enter your Admin or Manager-assigned Username or Email.'
       );
       return;
     }
@@ -134,8 +249,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (!selectedStaff) {
       setErrorMsg(
         lang === 'ne'
-          ? 'यो खाता भेटिएन। कृपया Google बाट लग-इन गर्नुहोस् वा Admin सँग सम्पर्क गर्नुहोस्।'
-          : 'Staff account not found. Use Google Sign-In or check your Admin-assigned username.'
+          ? 'यो खाता भेटिएन। कृपया Email/Google लग-इन वा Admin/Manager सँग सम्पर्क गर्नुहोस्।'
+          : 'Staff account not found. Check your assigned username or sign in via Email/Google.'
       );
       return;
     }
@@ -148,8 +263,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     if (selectedStaff.isActive === false) {
       setErrorMsg(
         lang === 'ne'
-          ? 'यो कर्मचारी खाता Owner द्वारा निष्क्रिय गरिएको छ।'
-          : 'This staff account has been disabled by the Owner.'
+          ? 'यो कर्मचारी खाता Owner वा Manager द्वारा निष्क्रिय गरिएको छ।'
+          : 'This staff account has been disabled by Admin/Manager.'
       );
       setPin('');
       return;
@@ -253,7 +368,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setInviteFullName('');
         setInviteUsername('');
         setInvitePin('');
-        setLoginMode('signin');
+        setLoginMode('email');
         onLoginSuccess(session);
       } else {
         setErrorMsg(res.error || 'Invalid or expired invitation code.');
@@ -280,164 +395,461 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     STAFF: 'bg-slate-100 text-slate-800 border-slate-300'
   };
 
+  const displayError = errorMsg || cloudAuthError;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 my-auto">
-        {/* Top Header - Fixed */}
-        <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white">
-              <Lock className="h-4 w-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm">
-                {lang === 'ne' ? 'कर्मचारी प्रमाणिकरण तथा लग-इन' : 'Staff Access & Authentication'}
-              </h3>
-              <p className="text-[10px] text-slate-400">
-                {ownerControlLocked
-                  ? (lang === 'ne' ? 'Admin द्वारा तोकिएको भूमिकामा मात्र लग-इन अनुमति छ' : 'Single Admin-Assigned Role Enforced')
-                  : 'Role-Based Access Control (RBAC) System'}
-              </p>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/95 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="w-full max-w-[420px] my-auto flex flex-col items-center">
+        {/* Main Centered Dine Track Style Card */}
+        <div className="relative w-full bg-white rounded-3xl shadow-xl border border-slate-200/80 px-6 sm:px-8 pt-8 pb-6 space-y-5">
+          {/* Optional Close Button when switching accounts */}
           {!isMandatory && onClose && (
             <button
               type="button"
               onClick={onClose}
               aria-label="Close login modal"
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+              className="absolute right-4 top-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
             >
               <X className="h-5 w-5" />
             </button>
           )}
-        </div>
 
-        {/* Scrollable Form Body */}
-        {pendingRotationStaff ? (
-          <form onSubmit={handleConfirmPinRotation} className="p-5 overflow-y-auto flex-1 space-y-4 min-h-0">
-            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-1 text-xs">
-              <div className="font-bold text-amber-950 flex items-center gap-1.5">
-                <KeyRound className="h-4 w-4 text-amber-700" />
-                <span>
-                  {lang === 'ne' ? 'सुरक्षा PIN परिवर्तन अनिवार्य छ' : 'Production Security: Change Default PIN'}
-                </span>
+          {/* Top Circular Brand Emblem + Headline */}
+          <div className="flex flex-col items-center text-center space-y-3">
+            {businessLogoUrl ? (
+              <div className="h-16 w-16 rounded-full bg-orange-500 p-1 shadow-md shadow-orange-500/20 flex items-center justify-center overflow-hidden">
+                <img
+                  src={businessLogoUrl}
+                  alt={businessName}
+                  className="h-full w-full rounded-full object-cover bg-white"
+                />
               </div>
-              <p className="text-[11px] text-amber-900">
-                {lang === 'ne'
-                  ? `${pendingRotationStaff.name} खातामा अझै डिफल्ट वा कमजोर PIN प्रयोग भएको छ। अगाडि बढ्न ४–८ अंकको नयाँ सुरक्षित PIN राख्नुहोस्।`
-                  : `Account "${pendingRotationStaff.name}" is using a factory-default or weak PIN. Set a unique 4–8 digit PIN to continue.`}
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                {lang === 'ne' ? 'नयाँ सुरक्षित PIN (४–८ अंक):' : 'New Strong PIN (4–8 digits):'}
-              </label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={8}
-                required
-                value={rotationNewPin}
-                onChange={(e) => {
-                  setRotationNewPin(e.target.value.replace(/\D/g, ''));
-                  setErrorMsg('');
-                }}
-                placeholder="••••••"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-center tracking-widest text-base"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                {lang === 'ne' ? 'नयाँ PIN पुनः प्रविष्ट गर्नुहोस्:' : 'Confirm New PIN:'}
-              </label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={8}
-                required
-                value={rotationConfirmPin}
-                onChange={(e) => {
-                  setRotationConfirmPin(e.target.value.replace(/\D/g, ''));
-                  setErrorMsg('');
-                }}
-                placeholder="••••••"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-center tracking-widest text-base"
-              />
-            </div>
-
-            {errorMsg && (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-200">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>{errorMsg}</span>
+            ) : (
+              <div className="h-16 w-16 rounded-full bg-orange-500 text-white shadow-md shadow-orange-500/25 flex items-center justify-center">
+                {/* Circular plate + crossed fork & spoon emblem matching reference */}
+                <svg
+                  viewBox="0 0 64 64"
+                  className="h-11 w-11"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <circle cx="32" cy="32" r="24" stroke="white" strokeWidth="2.2" strokeOpacity="0.95" />
+                  <circle cx="32" cy="32" r="19" stroke="white" strokeWidth="1.2" strokeOpacity="0.55" />
+                  {/* Spoon bottom-left to center */}
+                  <path
+                    d="M21 43L31.5 32.5"
+                    stroke="white"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                  />
+                  <ellipse
+                    cx="20"
+                    cy="44"
+                    rx="3.4"
+                    ry="4.6"
+                    transform="rotate(45 20 44)"
+                    fill="white"
+                  />
+                  {/* Fork center to top-right */}
+                  <path
+                    d="M32 32L41 21"
+                    stroke="white"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M38.5 18.5L43.5 23.5M40.5 16.5L44.5 20.5M42.5 18.5L46 15"
+                    stroke="white"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
               </div>
             )}
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingRotationStaff(null);
-                  setErrorMsg('');
-                }}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs"
-              >
-                {lang === 'ne' ? 'पछाडि' : 'Back'}
-              </button>
-              <button
-                type="submit"
-                disabled={rotationNewPin.length < 4 || isRotatingPin}
-                className="flex-1 py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-sm"
-              >
-                {isRotatingPin
-                  ? (lang === 'ne' ? 'सुरक्षित गर्दै...' : 'Updating PIN...')
-                  : (lang === 'ne' ? 'नयाँ PIN सेभ गरी लग-इन गर्नुहोस्' : 'Save New PIN & Unlock')}
-              </button>
+            <div className="space-y-1">
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
+                {pendingRotationStaff
+                  ? lang === 'ne'
+                    ? 'नयाँ सुरक्षा PIN सेट गर्नुहोस्'
+                    : 'Update Security PIN'
+                  : loginMode === 'forgot'
+                  ? lang === 'ne'
+                    ? 'पासवर्ड रिसेट गर्नुहोस्'
+                    : 'Reset Password'
+                  : loginMode === 'invite'
+                  ? lang === 'ne'
+                    ? 'निमन्त्रणा कोड सक्रिय गर्नुहोस्'
+                    : 'Activate Staff Invite'
+                  : lang === 'ne'
+                  ? `${businessName} मा लग-इन गर्नुहोस्`
+                  : `Log In to ${businessName}`}
+              </h2>
+              <p className="text-sm text-slate-500 leading-snug">
+                {pendingRotationStaff
+                  ? lang === 'ne'
+                    ? 'अगाडि बढ्न बलियो व्यक्तिगत PIN बनाउनुहोस्।'
+                    : 'Set a unique personal PIN to continue.'
+                  : loginMode === 'forgot'
+                  ? lang === 'ne'
+                    ? 'पासवर्ड रिसेट लिंक पाउन इमेल प्रविष्ट गर्नुहोस्।'
+                    : 'Enter your registered email to receive a reset link.'
+                  : loginMode === 'invite'
+                  ? lang === 'ne'
+                    ? 'Admin वा Manager ले दिएको कोड प्रयोग गर्नुहोस्।'
+                    : 'Enter the invite code assigned by your Admin or Manager.'
+                  : lang === 'ne'
+                  ? 'फेरि स्वागत छ। सेवा सुरु गर्न साइन इन गर्नुहोस्।'
+                  : 'Welcome back. Sign in to pick up the service.'}
+              </p>
             </div>
-          </form>
-        ) : (
-        <div className="overflow-y-auto flex-1 min-h-0 flex flex-col">
-          {onAcceptInviteCode && (
-            <div className="px-4 pt-3 pb-1 flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode('signin');
-                  setErrorMsg('');
-                }}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold border transition-colors ${
-                  loginMode === 'signin'
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {lang === 'ne' ? 'Google / PIN लग-इन' : 'Google / PIN Sign In'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode('invite');
-                  setErrorMsg('');
-                }}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold border inline-flex items-center justify-center gap-1.5 transition-colors ${
-                  loginMode === 'invite'
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <UserPlus className="h-3.5 w-3.5" />
-                <span>{lang === 'ne' ? 'Invite Code राख्नुहोस्' : 'Have Invite Code?'}</span>
-              </button>
+          </div>
+
+          {/* Connected Cloud Email Pill if already signed into Firebase */}
+          {cloudUserEmail && !pendingRotationStaff && (
+            <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+              <span className="truncate">{cloudUserEmail}</span>
             </div>
           )}
 
-          {loginMode === 'invite' && onAcceptInviteCode ? (
-            <form onSubmit={handleSubmitInviteCode} className="p-4 space-y-3">
-              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-[11px] text-indigo-950 leading-relaxed">
+          {/* Mandatory PIN Rotation Flow */}
+          {pendingRotationStaff ? (
+            <form onSubmit={handleConfirmPinRotation} className="space-y-4 pt-1">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-950 leading-relaxed">
                 {lang === 'ne'
-                  ? 'Owner ले दिएको Invitation Code (जस्तै INV-XXXXXX) राख्नुहोस् — तपाईंको तोकिएको भूमिका (Role) अनुसार सिधै ड्यासबोर्ड खुल्नेछ।'
-                  : 'Enter your Admin-issued Invitation Code (e.g. INV-XXXXXX) to activate your account and open your assigned role dashboard.'}
+                  ? `${pendingRotationStaff.name} खातामा डिफल्ट वा कमजोर PIN प्रयोग भएको छ। कृपया ४–८ अंकको नयाँ PIN राख्नुहोस्।`
+                  : `Account "${pendingRotationStaff.name}" is using a default or weak PIN. Set a unique 4–8 digit PIN to unlock.`}
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  {lang === 'ne' ? 'नयाँ PIN (४–८ अंक)' : 'New PIN (4–8 digits)'}
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  required
+                  value={rotationNewPin}
+                  onChange={(e) => {
+                    setRotationNewPin(e.target.value.replace(/\D/g, ''));
+                    setErrorMsg('');
+                  }}
+                  placeholder="••••••"
+                  className="w-full px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  {lang === 'ne' ? 'नयाँ PIN पुनः राख्नुहोस्' : 'Confirm New PIN'}
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  required
+                  value={rotationConfirmPin}
+                  onChange={(e) => {
+                    setRotationConfirmPin(e.target.value.replace(/\D/g, ''));
+                    setErrorMsg('');
+                  }}
+                  placeholder="••••••"
+                  className="w-full px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
+                />
+              </div>
+
+              {displayError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-3 rounded-2xl border border-rose-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingRotationStaff(null);
+                    setErrorMsg('');
+                  }}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-semibold text-sm transition-colors"
+                >
+                  {lang === 'ne' ? 'पछाडि' : 'Back'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={rotationNewPin.length < 4 || isRotatingPin}
+                  className="flex-1 py-3 px-5 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-sm transition-colors"
+                >
+                  {isRotatingPin
+                    ? lang === 'ne' ? 'सुरक्षित गर्दै...' : 'Saving...'
+                    : lang === 'ne' ? 'PIN सेभ गरी लग-इन' : 'Save PIN & Continue'}
+                </button>
+              </div>
+            </form>
+          ) : loginMode === 'email' ? (
+            /* PRIMARY VIEW — Matches Dine Track Reference Screenshot */
+            <form onSubmit={handleEmailLoginSubmit} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="login-email-id"
+                  className="block text-sm font-semibold text-slate-800 mb-1.5"
+                >
+                  {lang === 'ne' ? 'इमेल ID (Email ID)' : 'Email ID'}
+                </label>
+                <input
+                  id="login-email-id"
+                  type="email"
+                  autoComplete="email"
+                  value={emailInput}
+                  onChange={(e) => {
+                    setEmailInput(e.target.value);
+                    setErrorMsg('');
+                    setInfoMsg('');
+                  }}
+                  placeholder="you@restaurant.com"
+                  className="w-full px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="login-password"
+                  className="block text-sm font-semibold text-slate-800 mb-1.5"
+                >
+                  {lang === 'ne' ? 'पासवर्ड (Password)' : 'Password'}
+                </label>
+                <div className="relative">
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={passwordInput}
+                    onChange={(e) => {
+                      setPasswordInput(e.target.value);
+                      setErrorMsg('');
+                      setInfoMsg('');
+                    }}
+                    placeholder={lang === 'ne' ? 'आफ्नो पासवर्ड राख्नुहोस्' : 'Enter your password'}
+                    className="w-full pl-4 pr-12 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 h-10 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-xl transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Remember Me + Forgot Password Row */}
+              <div className="flex items-center justify-between text-sm pt-0.5">
+                <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4.5 w-4.5 rounded border-slate-300 text-orange-500 accent-orange-500 focus:ring-orange-500 cursor-pointer"
+                  />
+                  <span className="text-slate-700 font-medium">
+                    {lang === 'ne' ? 'मलाई सम्झनुहोस्' : 'Remember Me'}
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => switchMode('forgot')}
+                  className="text-orange-500 hover:text-orange-600 font-semibold transition-colors"
+                >
+                  {lang === 'ne' ? 'पासवर्ड बिर्सनुभयो?' : 'Forgot Password?'}
+                </button>
+              </div>
+
+              {/* Alerts */}
+              {isEmbeddedWebView && (
+                <div className="flex items-start gap-2 text-xs font-medium text-amber-900 bg-amber-50 p-3 rounded-2xl border border-amber-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                  <span>
+                    {lang === 'ne'
+                      ? 'Messenger भित्र Google लग-इन र App Install चल्दैन — माथि ⋮ थिचेर "Open in Chrome" गर्नुहोस्।'
+                      : 'Google Sign-In & App Install do not work inside Messenger — tap ⋮ and open in Chrome or Safari.'}
+                  </span>
+                </div>
+              )}
+
+              {displayError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-3 rounded-2xl border border-rose-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
+                </div>
+              )}
+
+              {infoMsg && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-emerald-800 bg-emerald-50 p-3 rounded-2xl border border-emerald-200">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+                  <span>{infoMsg}</span>
+                </div>
+              )}
+
+              {/* Primary Orange Log In Button */}
+              <button
+                type="submit"
+                disabled={isEmailLoading}
+                className="w-full h-12 bg-orange-500 hover:bg-orange-600 active:scale-[0.99] disabled:opacity-50 text-white rounded-full font-semibold text-base shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                <span>
+                  {isEmailLoading
+                    ? lang === 'ne' ? 'लग-इन हुँदैछ...' : 'Logging in...'
+                    : lang === 'ne' ? 'लग-इन गर्नुहोस्' : 'Log in'}
+                </span>
+              </button>
+
+              {/* Google Sign-In Option */}
+              {onGoogleSignIn && (
+                <>
+                  <div className="relative flex items-center py-0.5">
+                    <div className="flex-grow border-t border-slate-200" />
+                    <span className="shrink-0 mx-3 text-xs text-slate-400 font-medium">
+                      {lang === 'ne' ? 'वा' : 'or'}
+                    </span>
+                    <div className="flex-grow border-t border-slate-200" />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isGoogleAuthLoading}
+                    onClick={() => onGoogleSignIn()}
+                    className="w-full h-11 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-full font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-50"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden="true">
+                      <path
+                        fill="#4285F4"
+                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                      />
+                    </svg>
+                    <span>
+                      {isGoogleAuthLoading
+                        ? lang === 'ne' ? 'Google प्रमाणित गर्दै...' : 'Connecting Google...'
+                        : lang === 'ne' ? 'Google बाट लग-इन गर्नुहोस्' : 'Continue with Google'}
+                    </span>
+                  </button>
+                </>
+              )}
+
+              {/* Floor Staff PIN Switcher Footer */}
+              <div className="pt-3 border-t border-slate-100 text-center space-y-1.5">
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  {lang === 'ne' ? 'फ्लोरमा अर्डर लिँदै हुनुहुन्छ? ' : 'Taking orders on the floor? '}
+                  <button
+                    type="button"
+                    onClick={() => switchMode('pin')}
+                    className="text-orange-500 hover:text-orange-600 font-semibold transition-colors"
+                  >
+                    {lang === 'ne' ? 'आफ्नो Staff PIN बाट लग-इन गर्नुहोस्' : 'Log in with your staff PIN'}
+                  </button>
+                </p>
+                {onAcceptInviteCode && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => switchMode('invite')}
+                      className="text-xs font-medium text-slate-500 hover:text-orange-600 underline transition-colors"
+                    >
+                      {lang === 'ne' ? 'Invite Code छ? यहाँ सक्रिय गर्नुहोस्' : 'Have an Invite Code? Activate here'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </form>
+          ) : loginMode === 'forgot' ? (
+            /* FORGOT PASSWORD VIEW */
+            <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1.5">
+                  {lang === 'ne' ? 'दर्ता गरिएको इमेल (Registered Email)' : 'Registered Email ID'}
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <input
+                    type="email"
+                    required
+                    value={resetEmailInput}
+                    onChange={(e) => {
+                      setResetEmailInput(e.target.value);
+                      setErrorMsg('');
+                      setInfoMsg('');
+                    }}
+                    placeholder="you@restaurant.com"
+                    className="w-full pl-10 pr-4 py-3 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {lang === 'ne'
+                  ? 'नोट: यदि तपाईं PIN-मात्र प्रयोग गर्ने स्टाफ हुनुहुन्छ भने Admin वा Manager बाट नयाँ PIN रिसेट गराउनुहोस्।'
+                  : 'Note: If you sign in with a Staff PIN only, ask your Admin or Manager to reset your PIN from the Staff Roster.'}
+              </p>
+
+              {displayError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-3 rounded-2xl border border-rose-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
+                </div>
+              )}
+
+              {infoMsg && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-emerald-800 bg-emerald-50 p-3 rounded-2xl border border-emerald-200">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+                  <span>{infoMsg}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSendingReset}
+                className="w-full h-12 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all"
+              >
+                {isSendingReset
+                  ? lang === 'ne' ? 'लिंक पठाउँदै...' : 'Sending reset link...'
+                  : lang === 'ne' ? 'रिसेट लिंक पठाउनुहोस्' : 'Send Password Reset Link'}
+              </button>
+
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => switchMode('email')}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-orange-500 hover:text-orange-600"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>{lang === 'ne' ? 'Email लग-इनमा फर्कनुहोस्' : 'Back to Email Login'}</span>
+                </button>
+              </div>
+            </form>
+          ) : loginMode === 'invite' && onAcceptInviteCode ? (
+            /* INVITE CODE ACTIVATION VIEW */
+            <form onSubmit={handleSubmitInviteCode} className="space-y-3.5">
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-2xl text-xs text-orange-950 leading-relaxed">
+                {lang === 'ne'
+                  ? 'Admin वा Manager ले दिएको निमन्त्रणा कोड (INV-XXXXXX) राख्नुहोस् — तपाईंको तोकिएको Role अनुसार सिधै ड्यासबोर्ड खुल्नेछ।'
+                  : 'Enter your Admin/Manager-issued Invitation Code (INV-XXXXXX) to activate your assigned role.'}
               </div>
 
               <div>
@@ -453,7 +865,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setErrorMsg('');
                   }}
                   placeholder="INV-XXXXXX"
-                  className="w-full px-3 py-2 text-xs font-mono font-bold tracking-wider bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-600"
+                  className="w-full px-3.5 py-2.5 text-xs font-mono font-bold tracking-wider bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
                 />
               </div>
 
@@ -471,7 +883,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setErrorMsg('');
                     }}
                     placeholder="Sita Gurung"
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-600"
+                    className="w-full px-3 py-2 text-xs bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -487,14 +899,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setErrorMsg('');
                     }}
                     placeholder="sita"
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-600"
+                    className="w-full px-3 py-2 text-xs bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {lang === 'ne' ? 'आफ्नो सुरक्षा PIN सेट गर्नुहोस् (४–८ अंक) *' : 'Create Your Security PIN (4–8 digits) *'}
+                  {lang === 'ne' ? 'आफ्नो सुरक्षा PIN सेट गर्नुहोस् (४–८ अंक) *' : 'Create Security PIN (4–8 digits) *'}
                 </label>
                 <input
                   type="password"
@@ -507,302 +919,282 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setErrorMsg('');
                   }}
                   placeholder="••••••"
-                  className="w-full px-3 py-2 text-sm font-mono text-center tracking-widest bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-600"
+                  className="w-full px-3 py-2.5 text-sm font-mono text-center tracking-widest bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
                 />
               </div>
 
-              {errorMsg && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-200">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  <span>{errorMsg}</span>
+              {displayError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
                 </div>
               )}
 
               <button
                 type="submit"
                 disabled={isAcceptingInvite}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-sm flex items-center justify-center gap-2"
+                className="w-full h-11 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-sm flex items-center justify-center gap-2 transition-colors"
               >
-                <ShieldCheck className="h-4 w-4" />
+                <UserPlus className="h-4 w-4" />
                 <span>
                   {isAcceptingInvite
-                    ? (lang === 'ne' ? 'सक्रिय गर्दै...' : 'Activating Account...')
-                    : (lang === 'ne' ? 'Invite स्वीकार गरी ड्यासबोर्ड खोल्नुहोस्' : 'Accept Invite & Open Role Dashboard')}
+                    ? lang === 'ne' ? 'सक्रिय गर्दै...' : 'Activating...'
+                    : lang === 'ne' ? 'Invite स्वीकार गरी खोल्नुहोस्' : 'Accept Invite & Continue'}
                 </span>
               </button>
+
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => switchMode('email')}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-orange-500 hover:text-orange-600"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>{lang === 'ne' ? 'Email लग-इनमा फर्कनुहोस्' : 'Back to Email & Password Login'}</span>
+                </button>
+              </div>
             </form>
           ) : (
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
-          {/* Google Cloud Sync & Master Owner / Invited Staff Login */}
-          {onGoogleSignIn && (
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800">
-                  <Globe className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>{lang === 'ne' ? 'Google खाता लग-इन (Owner र स्टाफ)' : 'Google Sign-In (Owner & Invited Staff)'}</span>
-                </div>
-                {cloudUserEmail && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                    <CheckCircle2 className="h-3 w-3" />
-                    <span className="truncate max-w-[120px]">{cloudUserEmail}</span>
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                disabled={isGoogleAuthLoading}
-                onClick={() => onGoogleSignIn()}
-                className="w-full py-2.5 px-3 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 rounded-xl font-bold text-xs shadow-2xs transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span>
-                  {isGoogleAuthLoading
-                    ? (lang === 'ne' ? 'Google प्रमाणित गर्दै...' : 'Connecting Google...')
-                    : (lang === 'ne' ? 'Google बाट लग-इन गर्नुहोस्' : 'Continue with Google')}
-                </span>
-              </button>
-
-              <p className="text-[10px] text-slate-500 leading-relaxed">
-                {lang === 'ne'
-                  ? `Owner वा Admin ले तपाईंको Gmail लाई जुन भूमिका (Role) दिनुभएको छ, सोही भूमिकामा मात्र सुरक्षित लग-इन हुनेछ।`
-                  : `Sign in with Google for verified Owner / App Creator access, or your Admin-assigned staff role.`}
-              </p>
-
-              {isEmbeddedWebView && (
-                <div className="flex items-start gap-1.5 text-[11px] font-semibold text-amber-900 bg-amber-50 p-2 rounded-lg border border-amber-200">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600" />
-                  <span>
+            /* STAFF PIN KEYPAD VIEW — Triggered by "Log in with your staff PIN" */
+            <form onSubmit={handlePinSubmit} className="space-y-3.5">
+              {ownerControlLocked ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     {lang === 'ne'
-                      ? 'Messenger भित्र Google लग-इन र App Install चल्दैन — माथि ⋮ थिचेर "Open in Chrome" गर्नुहोस्।'
-                      : 'Google Sign-In & Install do not work inside Messenger browser — tap ⋮ and choose "Open in Chrome" or Safari.'}
-                  </span>
+                      ? 'तपाईंको Username वा Email (Admin / Manager ले दिएको):'
+                      : 'Staff Username or Email (Assigned by Admin / Manager):'}
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="username"
+                    value={staffIdentifier}
+                    onChange={(e) => {
+                      setStaffIdentifier(e.target.value);
+                      setErrorMsg('');
+                    }}
+                    placeholder={lang === 'ne' ? 'उदा. waiter, cashier, ram...' : 'e.g. waiter, cashier, ram...'}
+                    className="w-full px-3.5 py-2.5 text-sm font-medium bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                  />
                 </div>
-              )}
-
-              {cloudAuthError && (
-                <div className="flex items-start gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-200">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>{cloudAuthError}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Staff Identification: Hidden cards when Owner Control Lock is ON */}
-          {ownerControlLocked ? (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                {lang === 'ne' ? 'तपाईंको Username वा Email (Admin ले दिएको):' : 'Staff Username or Email (Assigned by Admin):'}
-              </label>
-              <input
-                type="text"
-                autoComplete="username"
-                value={staffIdentifier}
-                onChange={(e) => {
-                  setStaffIdentifier(e.target.value);
-                  setErrorMsg('');
-                }}
-                placeholder={lang === 'ne' ? 'उदा. waiter, cashier, ram...' : 'e.g. waiter, cashier, manager...'}
-                className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-600"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">
-                {lang === 'ne'
-                  ? 'प्रत्येक कर्मचारीले आफ्नो तोकिएको खाता र पिनबाट मात्र लग-इन गर्न सक्छन्।'
-                  : 'Staff cards & other role shortcuts are hidden for security. You can only log into your assigned account.'}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                {lang === 'ne' ? 'कर्मचारी तथा पद रोज्नुहोस् (Select Staff Member):' : 'Select Staff Member:'}
-              </label>
-              <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                {staffUsers.map((user) => {
-                  const isSelected = selectedStaff?.id === user.id;
-                  const isDisabled = user.isActive === false;
-                  return (
-                    <button
-                      key={user.id}
-                      type="button"
-                      disabled={isDisabled}
-                      onClick={() => {
-                        setSelectedStaffId(user.id);
-                        setPin('');
-                        setErrorMsg('');
-                      }}
-                      className={`p-2 rounded-lg border text-left transition-all flex flex-col justify-between ${
-                        isDisabled
-                          ? 'opacity-45 bg-slate-100 border-slate-200 cursor-not-allowed'
-                          : isSelected
-                          ? 'border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-500/20'
-                          : 'border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div>
-                        <span className="font-bold text-xs text-slate-900 block leading-tight truncate">
-                          {user.name}
-                        </span>
-                        {user.nepaliName && (
-                          <span className="text-[10px] text-slate-500 block leading-tight truncate mt-0.5">
-                            {user.nepaliName}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className={`inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded border ${roleColorMap[user.role]}`}>
-                          {user.role}
-                        </span>
-                        {isDisabled && (
-                          <span className="text-[9px] font-bold text-rose-600">Disabled</span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* PIN Input & Dots */}
-          <div className="space-y-1.5 pt-1.5 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700">
-                {lang === 'ne' ? 'सुरक्षा PIN कोड (Enter PIN):' : 'Security PIN:'}
-              </label>
-              {selectedStaff && !ownerControlLocked && (
-                <span className="text-[11px] text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  Role: {selectedStaff.role}
-                </span>
-              )}
-            </div>
-
-            {/* PIN Display Dots (4 to 6 digits) */}
-            <div className="flex justify-center items-center gap-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200">
-              {Array.from({ length: Math.max(4, pin.length) }).slice(0, 6).map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`h-3.5 w-3.5 rounded-full border-2 transition-all ${
-                    pin.length > idx
-                      ? 'bg-slate-900 border-slate-900 scale-110'
-                      : 'border-slate-300 bg-white'
-                  }`}
-                />
-              ))}
-            </div>
-
-            {/* Error Message */}
-            {errorMsg && (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 p-1.5 rounded-lg border border-rose-200">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            {/* Keypad - Compact */}
-            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    if (k === 'C') setPin('');
-                    else if (k === '⌫') handleBackspace();
-                    else handleKeypadPress(k);
-                  }}
-                  className={`py-2 rounded-lg text-sm font-bold transition-all active:scale-95 ${
-                    k === 'C'
-                      ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-                      : k === '⌫'
-                      ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                      : 'bg-white border border-slate-200 text-slate-900 hover:bg-slate-100 shadow-2xs'
-                  }`}
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-
-            {/* Unprivileged Testing PIN Helper — Hidden completely when Owner Control Lock is ON */}
-            {visibleDemoPinRoles.length > 0 && (
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowDemoPins(p => !p)}
-                  className="text-[10px] text-slate-500 hover:text-slate-800 flex items-center gap-1 underline"
-                >
-                  <KeyRound className="h-3 w-3" />
-                  <span>{showDemoPins ? 'Hide Staff Shortcuts' : (lang === 'ne' ? 'स्टाफ परीक्षण पिनहरू हेर्नुहोस्' : 'View Staff Demo PINs')}</span>
-                </button>
-                {showDemoPins && (
-                  <div className="mt-1 p-2 bg-slate-50 rounded-lg border border-slate-200 text-[10px] space-y-1">
-                    <p className="text-[10px] text-slate-500 font-semibold mb-1">
-                      {lang === 'ne' ? '१-क्लिक स्टाफ चयन (Owner PIN गोप्य राखिएको छ):' : '1-Click Staff Quick Fill (Owner PIN stays confidential):'}
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 font-mono-num text-slate-700">
-                      {visibleDemoPinRoles.map((demo) => (
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    {lang === 'ne' ? 'कर्मचारी रोज्नुहोस्:' : 'Select Staff Member:'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+                    {staffUsers.map((user) => {
+                      const isSelected = selectedStaff?.id === user.id;
+                      const isDisabled = user.isActive === false;
+                      return (
                         <button
-                          key={demo.role}
+                          key={user.id}
                           type="button"
+                          disabled={isDisabled}
                           onClick={() => {
-                            const found = staffUsers.find(s => s.role === demo.role && s.isActive !== false);
-                            if (found) setSelectedStaffId(found.id);
-                            setPin(demo.pin);
+                            setSelectedStaffId(user.id);
+                            setPin('');
                             setErrorMsg('');
                           }}
-                          className="px-2 py-1 bg-white hover:bg-emerald-50 hover:border-emerald-300 border border-slate-200 rounded text-left flex items-center justify-between transition-colors shadow-2xs"
+                          className={`p-2 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                            isDisabled
+                              ? 'opacity-45 bg-slate-100 border-slate-200 cursor-not-allowed'
+                              : isSelected
+                              ? 'border-orange-500 bg-orange-50/70 ring-2 ring-orange-500/20'
+                              : 'border-slate-200 hover:bg-slate-50'
+                          }`}
                         >
-                          <span className="font-semibold text-slate-800">{demo.label}:</span>
-                          <span className="font-bold text-emerald-800">{demo.pin}</span>
+                          <span className="font-bold text-xs text-slate-900 block leading-tight truncate">
+                            {user.name}
+                          </span>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className={`inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${roleColorMap[user.role]}`}>
+                              {user.role}
+                            </span>
+                            {isDisabled && <span className="text-[9px] font-bold text-rose-600">Disabled</span>}
+                          </div>
                         </button>
-                      ))}
-                    </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* PIN Dots */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">
+                    {lang === 'ne' ? 'सुरक्षा PIN कोड:' : 'Staff PIN:'}
+                  </label>
+                  {selectedStaff && !ownerControlLocked && (
+                    <span className="text-[10px] text-orange-800 font-bold bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
+                      {selectedStaff.role}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex justify-center items-center gap-3 py-2.5 bg-slate-50 rounded-2xl border border-slate-200">
+                  {Array.from({ length: Math.max(4, pin.length) })
+                    .slice(0, 6)
+                    .map((_, idx) => (
+                      <div
+                        key={idx}
+                        className={`h-3.5 w-3.5 rounded-full border-2 transition-all ${
+                          pin.length > idx
+                            ? 'bg-orange-500 border-orange-500 scale-110'
+                            : 'border-slate-300 bg-white'
+                        }`}
+                      />
+                    ))}
+                </div>
+
+                {displayError && (
+                  <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>{displayError}</span>
+                  </div>
+                )}
+
+                {/* Keypad */}
+                <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => {
+                        if (k === 'C') setPin('');
+                        else if (k === '⌫') handleBackspace();
+                        else handleKeypadPress(k);
+                      }}
+                      className={`py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
+                        k === 'C'
+                          ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                          : k === '⌫'
+                          ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          : 'bg-white border border-slate-200 text-slate-900 hover:bg-orange-50/50 shadow-2xs'
+                      }`}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Unprivileged Demo PINs — strictly hidden when Owner Control Lock is ON */}
+                {visibleDemoPinRoles.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDemoPins((p) => !p)}
+                      className="text-[11px] text-slate-500 hover:text-orange-600 flex items-center gap-1 underline"
+                    >
+                      <KeyRound className="h-3 w-3" />
+                      <span>
+                        {showDemoPins
+                          ? lang === 'ne' ? 'स्टाफ सर्टकट लुकाउनुहोस्' : 'Hide Staff Shortcuts'
+                          : lang === 'ne' ? 'स्टाफ परीक्षण पिनहरू हेर्नुहोस्' : 'View Staff Demo PINs'}
+                      </span>
+                    </button>
+                    {showDemoPins && (
+                      <div className="mt-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200 text-[10px] space-y-1">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 font-mono-num">
+                          {visibleDemoPinRoles.map((demo) => (
+                            <button
+                              key={demo.role}
+                              type="button"
+                              onClick={() => {
+                                const found = staffUsers.find((s) => s.role === demo.role && s.isActive !== false);
+                                if (found) setSelectedStaffId(found.id);
+                                setPin(demo.pin);
+                                setErrorMsg('');
+                              }}
+                              className="px-2 py-1 bg-white hover:bg-orange-50 border border-slate-200 rounded-lg text-left flex items-center justify-between"
+                            >
+                              <span className="font-semibold text-slate-800">{demo.label}:</span>
+                              <span className="font-bold text-orange-600">{demo.pin}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* Submit & Explicit Cancel Row */}
-          <div className="flex items-center gap-2 pt-1">
-            {!isMandatory && onClose && (
+              <button
+                type="submit"
+                disabled={pin.length < 4 || isVerifying}
+                className="w-full h-11 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                <span>
+                  {isVerifying
+                    ? lang === 'ne' ? 'प्रमाणित गर्दै...' : 'Verifying...'
+                    : lang === 'ne' ? 'PIN बाट लग-इन गर्नुहोस्' : 'Log in with PIN'}
+                </span>
+              </button>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => switchMode('email')}
+                  className="inline-flex items-center gap-1 font-semibold text-orange-500 hover:text-orange-600"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>{lang === 'ne' ? 'Email लग-इन' : 'Back to Email Login'}</span>
+                </button>
+                {onAcceptInviteCode && (
+                  <button
+                    type="button"
+                    onClick={() => switchMode('invite')}
+                    className="font-semibold text-slate-600 hover:text-orange-600 underline"
+                  >
+                    {lang === 'ne' ? 'Invite Code?' : 'Have Invite Code?'}
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+
+          {/* Bottom Language Switcher Pill — Matches Dine Track Reference */}
+          <div className="pt-2 flex items-center justify-center gap-2.5">
+            <Languages className="h-4 w-4 text-slate-400" aria-hidden="true" />
+            <div className="inline-flex items-center p-1 rounded-xl border border-slate-200 bg-slate-50">
               <button
                 type="button"
-                onClick={onClose}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition-colors"
+                onClick={() => onLanguageChange?.('en')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  lang === 'en'
+                    ? 'bg-orange-500 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
+                English
               </button>
-            )}
-            <button
-              type="submit"
-              disabled={pin.length < 4 || isVerifying}
-              className="flex-1 py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center justify-center gap-2"
-            >
-              <ShieldCheck className="h-4 w-4" />
-              <span>{isVerifying ? (lang === 'ne' ? 'प्रमाणित गर्दै...' : 'Verifying...') : (lang === 'ne' ? 'लग-इन गर्नुहोस् (Unlock)' : 'Unlock Assigned Role')}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onLanguageChange?.('ne')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  lang === 'ne'
+                    ? 'bg-orange-500 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                नेपाली
+              </button>
+            </div>
           </div>
-        </form>
-          )}
         </div>
-        )}
 
-        {/* Security Guidance Footer */}
-        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 text-[10px] text-slate-500 flex items-center justify-between gap-2 flex-wrap shrink-0">
-          <span className="flex items-center gap-1.5 text-slate-600 font-medium">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-            <span>{lang === 'ne' ? 'सुरक्षित SHA-256 प्रमाणिकरण' : 'Encrypted SHA-256 Authentication'}</span>
-          </span>
-          <div className="flex items-center gap-2">
+        {/* Quiet App Utility Bar Underneath Card */}
+        {(onOpenMobileQR || onOpenDownloadPortal) && (
+          <div className="mt-4 flex items-center justify-center gap-3 flex-wrap text-xs text-slate-500">
             <PWAInstallButton lang={lang} compact />
             {onOpenMobileQR && (
               <button
                 type="button"
                 onClick={onOpenMobileQR}
-                className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 hover:text-slate-950 bg-white border border-slate-300 px-2 py-1 rounded-lg shadow-2xs transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-orange-300 hover:text-orange-600 font-semibold shadow-2xs transition-colors"
               >
-                <QrCode className="h-3 w-3 text-emerald-700" />
+                <QrCode className="h-3.5 w-3.5 text-orange-500" />
                 <span>{lang === 'ne' ? 'मोबाइल QR' : 'Mobile QR'}</span>
               </button>
             )}
@@ -810,16 +1202,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={onOpenDownloadPortal}
-                className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 underline"
+                className="font-semibold text-slate-600 hover:text-orange-600 underline transition-colors"
               >
                 {lang === 'ne' ? 'डाउनलोड पेज' : 'Download Page'}
               </button>
             )}
-            <span className="text-slate-400">
-              {lang === 'ne' ? 'पिन गोप्य राख्नुहोस्' : 'Confidential PIN'}
-            </span>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

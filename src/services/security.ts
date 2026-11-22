@@ -316,6 +316,7 @@ const ROLE_PERMISSIONS: Record<StaffRole, Set<AppAction>> = {
     'TRANSFER_TABLE', 'CHECKIN_GUEST', 'CHECKOUT_GUEST', 'UPDATE_CLEANING_STATUS', 
     'STOCK_IN_OUT', 'ADJUST_KHATA_CREDIT', 'COLLECT_KHATA_PAYMENT', 'RECORD_EXPENSE', 
     'PERFORM_DAY_CLOSE', 'VIEW_FINANCIAL_REPORTS', 'EXPORT_DATA',
+    'MANAGE_STAFF', 'MANAGE_BUSINESS_STAFF', 'INVITE_STAFF',
     'VIEW_TAB_BUSINESS_ADMIN', 'VIEW_BUSINESS_AUDIT'
   ]),
   CASHIER: new Set([
@@ -353,6 +354,84 @@ const ROLE_PERMISSIONS: Record<StaffRole, Set<AppAction>> = {
     'VIEW_TAB_DASHBOARD', 'VIEW_TAB_POS', 'VIEW_TAB_BILLING', 'SEND_KOT'
   ])
 };
+
+export const SUBORDINATE_STAFF_ROLES: readonly StaffRole[] = [
+  'CASHIER',
+  'WAITER',
+  'KITCHEN',
+  'RECEPTIONIST',
+  'HOUSEKEEPING',
+  'ACCOUNTANT',
+  'INVENTORY_STAFF',
+  'STAFF'
+] as const;
+
+export function isOwnerOrAdminRole(role?: StaffRole): boolean {
+  return role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN';
+}
+
+export function canActorManageStaff(actorRole?: StaffRole): boolean {
+  return (
+    actorRole === 'SUPER_ADMIN' ||
+    actorRole === 'OWNER' ||
+    actorRole === 'ADMIN' ||
+    actorRole === 'MANAGER'
+  );
+}
+
+/**
+ * Hierarchical role assignment matrix:
+ * - OWNER / SUPER_ADMIN: can assign ADMIN, MANAGER, and all subordinate floor/back-office staff roles.
+ * - ADMIN: can assign ADMIN, MANAGER, and all subordinate roles (never OWNER or SUPER_ADMIN).
+ * - MANAGER: can assign ONLY subordinate operational staff roles (never OWNER, SUPER_ADMIN, ADMIN, or MANAGER).
+ * - All other roles: cannot assign any roles.
+ */
+export function getAssignableRolesForActor(actorRole?: StaffRole): StaffRole[] {
+  if (actorRole === 'SUPER_ADMIN' || actorRole === 'OWNER' || actorRole === 'ADMIN') {
+    return ['ADMIN', 'MANAGER', ...SUBORDINATE_STAFF_ROLES];
+  }
+  if (actorRole === 'MANAGER') {
+    return [...SUBORDINATE_STAFF_ROLES];
+  }
+  return [];
+}
+
+/**
+ * Checks whether an actor can edit, disable, or reset PIN on an existing staff account.
+ * Prevents lower-tier actors from modifying peer/higher-tier accounts.
+ */
+export function canActorManageStaffMember(
+  actorRole: StaffRole | undefined,
+  existingTargetRole: StaffRole
+): boolean {
+  if (!actorRole || !canActorManageStaff(actorRole)) return false;
+  if (actorRole === 'SUPER_ADMIN') {
+    return existingTargetRole !== 'SUPER_ADMIN';
+  }
+  if (actorRole === 'OWNER') {
+    return existingTargetRole !== 'SUPER_ADMIN' && existingTargetRole !== 'OWNER';
+  }
+  if (actorRole === 'ADMIN') {
+    return existingTargetRole !== 'SUPER_ADMIN' && existingTargetRole !== 'OWNER';
+  }
+  // MANAGER can manage strictly subordinate operational staff
+  return SUBORDINATE_STAFF_ROLES.includes(existingTargetRole);
+}
+
+/**
+ * Enforces both target-account authority and non-escalation when assigning a role.
+ */
+export function canActorAssignRole(
+  actorRole: StaffRole | undefined,
+  targetRole: StaffRole,
+  existingTargetRole?: StaffRole
+): boolean {
+  if (!actorRole || !canActorManageStaff(actorRole)) return false;
+  if (existingTargetRole && !canActorManageStaffMember(actorRole, existingTargetRole)) {
+    return false;
+  }
+  return getAssignableRolesForActor(actorRole).includes(targetRole);
+}
 
 export function getDefaultRolePermissions(role: StaffRole): AppAction[] {
   const permissions = ROLE_PERMISSIONS[role];

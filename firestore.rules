@@ -80,6 +80,10 @@ service cloud.firestore {
       return isActiveMember(businessId) && (memberData(businessId).role in allowedRoles);
     }
 
+    function isSubordinateStaffRole(role) {
+      return role in ['CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'];
+    }
+
     // -------------------------------------------------------------------------
     // Entity Validation Blueprints (No existing() or diff() inside helpers)
     // -------------------------------------------------------------------------
@@ -478,26 +482,31 @@ service cloud.firestore {
       allow delete: if isMasterOwnerEmail() || (isVerifiedUser() && resource != null && existing().ownerUid == request.auth.uid);
 
       // -----------------------------------------------------------------------
-      // /businesses/{businessId}/invites/{inviteId} - Owner-Issued Invites
+      // /businesses/{businessId}/invites/{inviteId} - Owner/Admin/Manager Invites
       // -----------------------------------------------------------------------
       match /invites/{inviteId} {
         allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) && (
           isMasterOwnerEmail() ||
           isBusinessOwner(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER']) ||
           (resource != null && existing().email == request.auth.token.email)
         );
         allow list: if isSignedIn() && isVerifiedUser() && (
           isMasterOwnerEmail() ||
           resource.data.ownerUid == request.auth.uid ||
-          resource.data.email == request.auth.token.email
+          resource.data.email == request.auth.token.email ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
         );
         allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
           isValidInvite(incoming(), businessId, inviteId) &&
           businessExists(businessId) &&
           incoming().ownerUid == businessData(businessId).ownerUid &&
-          isOwnerOrMaster(businessId) &&
           incoming().createdAt == request.time &&
-          incoming().updatedAt == request.time;
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN']) ||
+            (hasMemberRole(businessId, ['MANAGER']) && isSubordinateStaffRole(incoming().role))
+          );
         allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
           isValidInvite(incoming(), businessId, inviteId) &&
           incoming().inviteId == existing().inviteId &&
@@ -507,6 +516,12 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time && (
             isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN']) ||
+            (
+              hasMemberRole(businessId, ['MANAGER']) &&
+              isSubordinateStaffRole(existing().role) &&
+              isSubordinateStaffRole(incoming().role)
+            ) ||
             (
               existing().email == request.auth.token.email &&
               existing().status == 'PENDING' &&
@@ -524,11 +539,13 @@ service cloud.firestore {
       match /members/{memberUid} {
         allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) && (
           isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER']) ||
           request.auth.uid == memberUid
         );
         allow list: if isSignedIn() && isVerifiedUser() && (
           isMasterOwnerEmail() ||
-          resource.data.ownerUid == request.auth.uid
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
         );
         allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
           isValidMember(incoming(), businessId, memberUid) &&
@@ -559,9 +576,22 @@ service cloud.firestore {
           incoming().email == existing().email &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'isActive', 'name', 'updatedAt']) &&
-          isOwnerOrMaster(businessId) &&
-          (incoming().role != 'OWNER' || isMasterOwnerEmail() || request.auth.uid == existing().ownerUid);
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'isActive', 'name', 'updatedAt']) && (
+            (
+              isOwnerOrMaster(businessId) &&
+              (incoming().role != 'OWNER' || isMasterOwnerEmail() || request.auth.uid == existing().ownerUid)
+            ) ||
+            (
+              hasMemberRole(businessId, ['ADMIN']) &&
+              existing().role != 'OWNER' &&
+              incoming().role != 'OWNER'
+            ) ||
+            (
+              hasMemberRole(businessId, ['MANAGER']) &&
+              isSubordinateStaffRole(existing().role) &&
+              isSubordinateStaffRole(incoming().role)
+            )
+          );
         allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
           isOwnerOrMaster(businessId);
       }

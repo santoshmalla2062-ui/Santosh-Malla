@@ -3,6 +3,12 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   signOut,
   User
 } from 'firebase/auth';
@@ -88,11 +94,83 @@ async function testConnection() {
 
 testConnection();
 
+export function formatFirebaseAuthError(error: unknown, lang: 'en' | 'ne' = 'en'): string {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+  const rawMessage = error instanceof Error ? error.message : String(error || '');
+
+  switch (code) {
+    case 'auth/operation-not-allowed':
+      return lang === 'ne'
+        ? 'Firebase Console मा Email/Password लग-इन अझै Enable गरिएको छैन (Authentication → Sign-in method)। कृपया Google वा Staff PIN प्रयोग गर्नुहोस्।'
+        : 'Email/Password sign-in is not enabled yet in Firebase Console (Authentication → Sign-in method). Use Google or Staff PIN in the meantime.';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return lang === 'ne'
+        ? 'इमेल वा पासवर्ड मिलेन। कृपया जाँच गरी पुनः प्रयास गर्नुहोस्।'
+        : 'Incorrect email or password. Please check your credentials and try again.';
+    case 'auth/invalid-email':
+      return lang === 'ne'
+        ? 'कृपया सही इमेल ठेगाना प्रविष्ट गर्नुहोस्।'
+        : 'Please enter a valid email address.';
+    case 'auth/user-disabled':
+      return lang === 'ne'
+        ? 'यो खाता निष्क्रिय गरिएको छ। Admin वा Manager सँग सम्पर्क गर्नुहोस्।'
+        : 'This account has been disabled. Contact your Admin or Manager.';
+    case 'auth/too-many-requests':
+      return lang === 'ne'
+        ? 'धेरै पटक गलत प्रयास भयो। कृपया केही बेर पर्खेर पुनः प्रयास गर्नुहोस्।'
+        : 'Too many failed attempts. Please wait a moment before trying again.';
+    case 'auth/network-request-failed':
+      return lang === 'ne'
+        ? 'इन्टरनेट जडान समस्या देखियो। नेटवर्क जाँच गरी पुनः प्रयास गर्नुहोस्।'
+        : 'Network error. Check your internet connection and try again.';
+    case 'auth/email-already-in-use':
+      return lang === 'ne'
+        ? 'यो इमेल पहिले नै दर्ता भइसकेको छ।'
+        : 'This email address is already registered.';
+    case 'auth/weak-password':
+      return lang === 'ne'
+        ? 'पासवर्ड कम्तीमा ६ अक्षरको बलियो राख्नुहोस्।'
+        : 'Password should be at least 6 characters.';
+    case 'auth/popup-closed-by-user':
+      return lang === 'ne'
+        ? 'Google लग-इन पपअप बन्द गरियो।'
+        : 'Google sign-in popup was closed before completing.';
+    default:
+      return rawMessage || (lang === 'ne' ? 'प्रमाणीकरण असफल भयो। पुनः प्रयास गर्नुहोस्।' : 'Authentication failed. Please try again.');
+  }
+}
+
 export async function signInWithGooglePopup(): Promise<User> {
   const cred = await signInWithPopup(auth, googleProvider);
   return cred.user;
 }
 
+export async function signInWithEmailPassword(
+  email: string,
+  password: string,
+  rememberMe: boolean = true
+): Promise<User> {
+  await setPersistence(
+    auth,
+    rememberMe ? browserLocalPersistence : browserSessionPersistence
+  );
+  const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return cred.user;
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email.trim());
+}
+
+export async function sendUserEmailVerification(user: User): Promise<void> {
+  await sendEmailVerification(user);
+}
+
 export async function signOutFirebase(): Promise<void> {
   await signOut(auth);
 }
+

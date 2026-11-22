@@ -37,7 +37,19 @@ import { AppState, BusinessSettings, BusinessTenant, IrdComplianceSettings, Prin
 import { Language, TRANSLATIONS } from '../../utils/translations';
 import { compressBusinessLogoImageFile, sanitizeBusinessLogoUrl } from '../../utils/imageUtils';
 import { exportBackupJSON } from '../../services/storage';
-import { createStaffAccount, hasPermission, hashPinWithSalt, validateBackupJSON, validateProductionPin, AppAction, getDefaultRolePermissions } from '../../services/security';
+import {
+  canActorAssignRole,
+  canActorManageStaff,
+  canActorManageStaffMember,
+  createStaffAccount,
+  getAssignableRolesForActor,
+  hasPermission,
+  hashPinWithSalt,
+  validateBackupJSON,
+  validateProductionPin,
+  AppAction,
+  getDefaultRolePermissions
+} from '../../services/security';
 import { ALL_APP_MODULES, DEFAULT_PAYMENT_METHODS, DEFAULT_RECEIPT_SETTINGS } from '../../services/tenantStorage';
 import { buildEscPosReceiptBytes, openCashDrawerHardware, sendEscPosToHardware } from '../../services/escposPrinter';
 import { getNepalFiscalYear } from '../../services/irdCompliance';
@@ -267,8 +279,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const currentSectionMeta = SECTIONS.find(s => s.id === activeSubTab) || SECTIONS[0];
   const canAccessCurrentSection = userRole ? hasPermission(userRole, currentSectionMeta.requiredAction) : false;
   const canModifyConfig = userRole ? hasPermission(userRole, 'MODIFY_TAX_CONFIG') : false;
-  const canManageStaff = userRole ? hasPermission(userRole, 'MANAGE_BUSINESS_STAFF') : false;
+  const canManageStaff = canActorManageStaff(userRole) || (userRole ? hasPermission(userRole, 'MANAGE_BUSINESS_STAFF') : false);
   const canImportBackup = userRole === 'ADMIN' || userRole === 'OWNER' || userRole === 'SUPER_ADMIN';
+  const assignableRoles = getAssignableRolesForActor(userRole);
 
   // Available business roles
   const defaultRoles: { role: StaffRole; label: string }[] = [
@@ -284,6 +297,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     { role: 'INVENTORY_STAFF', label: 'INVENTORY STAFF' },
     { role: 'STAFF', label: 'STAFF' }
   ];
+  const assignableRoleOptions = defaultRoles.filter(r => assignableRoles.includes(r.role));
 
   const handleLogoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -376,6 +390,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleToggleStaffActive = (staffId: string) => {
     if (!canManageStaff || !onUpdateStaffUsers) return;
+    const target = appState.staffUsers.find(s => s.id === staffId);
+    if (!target || !canActorManageStaffMember(userRole, target.role)) {
+      setNotification({ type: 'error', message: `Permission denied: ${userRole || 'Staff'} cannot modify ${target?.role || 'this'} account.` });
+      return;
+    }
     const updated = appState.staffUsers.map(s => {
       if (s.id === staffId) {
         return { ...s, isActive: !s.isActive };
@@ -390,6 +409,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleCreateStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageStaff || !onUpdateStaffUsers) return;
+    if (!canActorAssignRole(userRole, newRole)) {
+      setNotification({ type: 'error', message: `Permission denied: ${userRole || 'Staff'} cannot create ${newRole} accounts.` });
+      return;
+    }
     if (!newUsername.trim() || !newName.trim() || newPin.length < 4) {
       setNotification({ type: 'error', message: 'Please provide valid username, name, and 4-digit PIN.' });
       return;
@@ -431,6 +454,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleResetPinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageStaff || !onUpdateStaffUsers || !resetPinTarget) return;
+    if (!canActorManageStaffMember(userRole, resetPinTarget.role)) {
+      setNotification({ type: 'error', message: `Permission denied: ${userRole || 'Staff'} cannot reset PIN for ${resetPinTarget.role}.` });
+      return;
+    }
     const pinCheck = await validateProductionPin(newSecretPin.trim(), appState.staffUsers, { excludeStaffId: resetPinTarget.id });
     if (!pinCheck.isValid) {
       setPinModalError(pinCheck.error || 'Weak or duplicate PIN is not allowed.');
@@ -461,6 +488,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleEditStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff || !onUpdateStaffUsers) return;
+    const original = appState.staffUsers.find(s => s.id === editingStaff.id);
+    if (!canActorAssignRole(userRole, editingStaff.role, original?.role)) {
+      setNotification({
+        type: 'error',
+        message: `Permission denied: ${userRole || 'Staff'} cannot assign role ${editingStaff.role}.`
+      });
+      return;
+    }
     const updated = appState.staffUsers.map(s => s.id === editingStaff.id ? editingStaff : s);
     onUpdateStaffUsers(updated);
     setNotification({
@@ -900,7 +935,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           {staff.pinHash.substring(0, 10)}... (SHA-256)
                         </td>
                         <td className="py-3 px-4 text-right space-x-2">
-                          {canManageStaff && (
+                          {canManageStaff && canActorManageStaffMember(userRole, staff.role) ? (
                             <>
                               <button
                                 type="button"
@@ -929,6 +964,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 {staff.isActive ? 'Disable' : 'Enable'}
                               </button>
                             </>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-400">
+                              {lang === 'ne' ? 'उच्च पद सुरक्षित' : 'Protected Role'}
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -1944,7 +1983,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) => setNewRole(e.target.value as StaffRole)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-bold"
                   >
-                    {defaultRoles.map(r => (
+                    {assignableRoleOptions.map(r => (
                       <option key={r.role} value={r.role}>{r.label}</option>
                     ))}
                   </select>
@@ -2103,14 +2142,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onChange={(e) => setEditingStaff({ ...editingStaff, role: e.target.value as StaffRole })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl font-semibold text-slate-800 bg-white"
                 >
-                  <option value="WAITER">WAITER (वेटर)</option>
-                  <option value="CASHIER">CASHIER (क्यासियर)</option>
-                  <option value="KITCHEN">KITCHEN (भान्छा/शेफ)</option>
-                  <option value="MANAGER">MANAGER (व्यवस्थापक)</option>
-                  <option value="ADMIN">ADMIN (प्रशासक)</option>
-                  <option value="RECEPTIONIST">RECEPTIONIST (होटल रिसेप्शन)</option>
-                  <option value="HOUSEKEEPING">HOUSEKEEPING (हाउसकिपिङ)</option>
-                  <option value="ACCOUNTANT">ACCOUNTANT (लेखापाल)</option>
+                  {assignableRoleOptions.map(r => (
+                    <option key={r.role} value={r.role}>{r.label}</option>
+                  ))}
                 </select>
               </div>
 

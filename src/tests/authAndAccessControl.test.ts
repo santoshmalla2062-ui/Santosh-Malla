@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './testEnv';
+import fs from 'node:fs';
+import path from 'node:path';
 import { 
   hashPinWithSalt, 
   generateSalt, 
@@ -8,9 +10,16 @@ import {
   saveSession, 
   getCurrentSession, 
   clearSession, 
-  hasPermission 
+  hasPermission,
+  SUBORDINATE_STAFF_ROLES,
+  isOwnerOrAdminRole,
+  canActorManageStaff,
+  getAssignableRolesForActor,
+  canActorManageStaffMember,
+  canActorAssignRole
 } from '../services/security';
-import { StaffUser } from '../types';
+import { formatFirebaseAuthError } from '../firebase';
+import { StaffRole, StaffUser } from '../types';
 
 test('Authentication: Salted SHA-256 PIN hashing & verification', async () => {
   const pin = '7788';
@@ -85,6 +94,16 @@ test('RBAC Authorization Matrix: Enforce role-based boundaries', () => {
   assert.strictEqual(hasPermission('ADMIN', 'MODIFY_PRICING'), true);
   assert.strictEqual(hasPermission('ADMIN', 'IMPORT_BACKUP'), true);
 
+  // MANAGER can manage operational staff & invites, but CANNOT bypass Admin governance controls
+  assert.strictEqual(hasPermission('MANAGER', 'MANAGE_STAFF'), true);
+  assert.strictEqual(hasPermission('MANAGER', 'MANAGE_BUSINESS_STAFF'), true);
+  assert.strictEqual(hasPermission('MANAGER', 'INVITE_STAFF'), true);
+  assert.strictEqual(hasPermission('MANAGER', 'VIEW_TAB_BUSINESS_ADMIN'), true);
+  assert.strictEqual(hasPermission('MANAGER', 'MANAGE_ROLES_PERMISSIONS'), false);
+  assert.strictEqual(hasPermission('MANAGER', 'MANAGE_BUSINESS_MODULES'), false);
+  assert.strictEqual(hasPermission('MANAGER', 'MODIFY_TAX_CONFIG'), false);
+  assert.strictEqual(hasPermission('MANAGER', 'MANAGE_PAYMENT_METHODS'), false);
+
   // CASHIER can settle bills but CANNOT modify menu pricing or import backups
   assert.strictEqual(hasPermission('CASHIER', 'SETTLE_PAYMENT'), true);
   assert.strictEqual(hasPermission('CASHIER', 'MODIFY_PRICING'), false);
@@ -107,3 +126,82 @@ test('RBAC Authorization Matrix: Enforce role-based boundaries', () => {
   assert.strictEqual(hasPermission('HOUSEKEEPING', 'SETTLE_PAYMENT'), false);
   assert.strictEqual(hasPermission('HOUSEKEEPING', 'VIEW_TAB_POS'), false);
 });
+
+test('Role Hierarchy & Anti-Escalation: Only Admin & Manager can assign roles with strict boundaries', () => {
+  assert.strictEqual(isOwnerOrAdminRole('OWNER'), true);
+  assert.strictEqual(isOwnerOrAdminRole('ADMIN'), true);
+  assert.strictEqual(isOwnerOrAdminRole('MANAGER'), false);
+
+  assert.strictEqual(canActorManageStaff('OWNER'), true);
+  assert.strictEqual(canActorManageStaff('ADMIN'), true);
+  assert.strictEqual(canActorManageStaff('MANAGER'), true);
+  assert.strictEqual(canActorManageStaff('CASHIER'), false);
+  assert.strictEqual(canActorManageStaff('WAITER'), false);
+  assert.strictEqual(canActorManageStaff('KITCHEN'), false);
+
+  // Assignable role lists
+  const adminAssignable = getAssignableRolesForActor('ADMIN');
+  assert.ok(adminAssignable.includes('ADMIN'));
+  assert.ok(adminAssignable.includes('MANAGER'));
+  assert.ok(!adminAssignable.includes('OWNER'));
+  assert.ok(!adminAssignable.includes('SUPER_ADMIN'));
+
+  const managerAssignable = getAssignableRolesForActor('MANAGER');
+  assert.deepStrictEqual(managerAssignable, [...SUBORDINATE_STAFF_ROLES]);
+  assert.ok(!managerAssignable.includes('OWNER'));
+  assert.ok(!managerAssignable.includes('ADMIN'));
+  assert.ok(!managerAssignable.includes('MANAGER'));
+
+  assert.deepStrictEqual(getAssignableRolesForActor('WAITER'), []);
+  assert.deepStrictEqual(getAssignableRolesForActor('CASHIER'), []);
+
+  // Existing member edit protection
+  assert.strictEqual(canActorManageStaffMember('ADMIN', 'OWNER'), false);
+  assert.strictEqual(canActorManageStaffMember('ADMIN', 'SUPER_ADMIN'), false);
+  assert.strictEqual(canActorManageStaffMember('ADMIN', 'MANAGER'), true);
+  assert.strictEqual(canActorManageStaffMember('ADMIN', 'WAITER'), true);
+
+  assert.strictEqual(canActorManageStaffMember('MANAGER', 'OWNER'), false);
+  assert.strictEqual(canActorManageStaffMember('MANAGER', 'ADMIN'), false);
+  assert.strictEqual(canActorManageStaffMember('MANAGER', 'MANAGER'), false);
+  assert.strictEqual(canActorManageStaffMember('MANAGER', 'WAITER'), true);
+  assert.strictEqual(canActorManageStaffMember('MANAGER', 'CASHIER'), true);
+
+  // Role assignment checks (including existing target role)
+  assert.strictEqual(canActorAssignRole('ADMIN', 'MANAGER', 'WAITER'), true);
+  assert.strictEqual(canActorAssignRole('ADMIN', 'ADMIN', 'MANAGER'), true);
+  assert.strictEqual(canActorAssignRole('ADMIN', 'OWNER', 'WAITER'), false);
+
+  assert.strictEqual(canActorAssignRole('MANAGER', 'CASHIER', 'WAITER'), true);
+  assert.strictEqual(canActorAssignRole('MANAGER', 'MANAGER', 'WAITER'), false);
+  assert.strictEqual(canActorAssignRole('MANAGER', 'ADMIN', 'WAITER'), false);
+  assert.strictEqual(canActorAssignRole('MANAGER', 'WAITER', 'ADMIN'), false);
+
+  const nonManagers: StaffRole[] = ['CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'];
+  for (const role of nonManagers) {
+    assert.strictEqual(canActorAssignRole(role, 'STAFF'), false);
+  }
+});
+
+test('Firebase Auth Errors: Bilingual Nepali & English messaging', () => {
+  const opDisabledEn = formatFirebaseAuthError({ code: 'auth/operation-not-allowed' }, 'en');
+  const opDisabledNe = formatFirebaseAuthError({ code: 'auth/operation-not-allowed' }, 'ne');
+  assert.ok(opDisabledEn.includes('Firebase Console'));
+  assert.ok(opDisabledNe.includes('Firebase Console'));
+
+  const badCredEn = formatFirebaseAuthError({ code: 'auth/invalid-credential' }, 'en');
+  const badCredNe = formatFirebaseAuthError({ code: 'auth/invalid-credential' }, 'ne');
+  assert.ok(badCredEn.toLowerCase().includes('email or password'));
+  assert.ok(badCredNe.includes('इमेल वा पासवर्ड'));
+
+  const rateLimitNe = formatFirebaseAuthError({ code: 'auth/too-many-requests' }, 'ne');
+  assert.ok(rateLimitNe.includes('पर्खेर'));
+});
+
+test('Firestore Rules: Manager subordinate-only & Admin role constraints on invites and members', () => {
+  const rulesText = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+  assert.ok(rulesText.includes('function isSubordinateStaffRole(role)'), 'Subordinate role helper must be defined in firestore.rules');
+  assert.ok(rulesText.includes("hasMemberRole(businessId, ['MANAGER']) && isSubordinateStaffRole(incoming().role)"), 'Invites create rule must restrict MANAGER to subordinate staff roles');
+  assert.ok(rulesText.includes('isSubordinateStaffRole(existing().role) &&\n              isSubordinateStaffRole(incoming().role)'), 'Invites and members update rules must block MANAGER privilege escalation');
+});
+

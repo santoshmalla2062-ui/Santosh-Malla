@@ -77,7 +77,18 @@ import {
   SecuritySettings
 } from '../../types';
 import { ALL_APP_MODULES, DEFAULT_PAYMENT_METHODS, DEFAULT_RECEIPT_SETTINGS } from '../../services/tenantStorage';
-import { createStaffAccount, hasPermission, hashPinWithSalt, getDefaultRolePermissions, validateProductionPin, AppAction } from '../../services/security';
+import {
+  canActorAssignRole,
+  canActorManageStaff,
+  canActorManageStaffMember,
+  createStaffAccount,
+  getAssignableRolesForActor,
+  hasPermission,
+  hashPinWithSalt,
+  getDefaultRolePermissions,
+  validateProductionPin,
+  AppAction
+} from '../../services/security';
 import {
   MASTER_OWNER_EMAIL,
   CloudStaffInvite,
@@ -313,14 +324,25 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const [lastCreatedCloudInvite, setLastCreatedCloudInvite] = useState<{ email: string; staffName: string; role: StaffRole } | null>(null);
   const [copiedInviteKey, setCopiedInviteKey] = useState<string | null>(null);
 
+  const actorRole: StaffRole | undefined = isMasterOwnerVerified ? 'SUPER_ADMIN' : currentSession?.role;
+
   const isOwnerOrAdmin =
     isMasterOwnerVerified ||
     currentSession?.role === 'OWNER' ||
     currentSession?.role === 'SUPER_ADMIN' ||
     currentSession?.role === 'ADMIN';
 
+  const canManageStaffRoster = isOwnerOrAdmin || actorRole === 'MANAGER' || canActorManageStaff(actorRole);
+  const assignableRoles = useMemo(() => getAssignableRolesForActor(actorRole), [actorRole]);
+
+  useEffect(() => {
+    if (!isOwnerOrAdmin && !['dashboard', 'staff', 'audit'].includes(activeTab)) {
+      setActiveTab('staff');
+    }
+  }, [isOwnerOrAdmin, activeTab]);
+
   const refreshCloudAccessLists = async () => {
-    if (!cloudSyncConnected || !isOwnerOrAdmin) return;
+    if (!cloudSyncConnected || !canManageStaffRoster) return;
     setIsLoadingCloudAccess(true);
     setCloudAccessError(null);
     try {
@@ -338,10 +360,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   useEffect(() => {
-    if ((activeTab === 'security' || activeTab === 'staff') && cloudSyncConnected && isOwnerOrAdmin) {
+    if ((activeTab === 'security' || activeTab === 'staff') && cloudSyncConnected && canManageStaffRoster) {
       refreshCloudAccessLists();
     }
-  }, [activeTab, cloudSyncConnected, business.businessId, isOwnerOrAdmin]);
+  }, [activeTab, cloudSyncConnected, business.businessId, canManageStaffRoster]);
 
   // Custom Roles Permissions Matrix State
   const [customRolesPermissions, setCustomRolesPermissions] = useState<Record<string, string[]>>(() => {
@@ -537,6 +559,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   const handleToggleStaffStatus = (staff: StaffUser) => {
+    if (!canActorManageStaffMember(actorRole, staff.role)) {
+      showBanner(`Permission denied: ${actorRole || 'User'} cannot modify ${staff.role} account.`);
+      return;
+    }
     const updatedUsers = appState.staffUsers.map(u => 
       u.id === staff.id ? { ...u, isActive: !u.isActive } : u
     );
@@ -549,6 +575,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaffUsername.trim() || !newStaffName.trim() || !newStaffPin.trim()) {
+      return;
+    }
+    if (!canActorAssignRole(actorRole, newStaffRole)) {
+      showBanner(`Permission denied: ${actorRole || 'User'} cannot assign role ${newStaffRole}.`);
       return;
     }
 
@@ -784,14 +814,22 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     if (!cloudOwnerUid) {
       setCloudAccessError(
         lang === 'ne'
-          ? `कृपया पहिले ${MASTER_OWNER_EMAIL} बाट Google लग-इन गर्नुहोस्।`
-          : `Please sign in with Google (${MASTER_OWNER_EMAIL}) first to invite staff devices.`
+          ? 'कृपया पहिले Google वा Email बाट प्रमाणित Cloud खाता लग-इन गर्नुहोस्।'
+          : 'Please sign in with a verified cloud account (Owner, Admin, or Manager) first to invite staff devices.'
       );
       return;
     }
     const targetEmail = cloudInviteEmail.trim();
     const targetName = cloudInviteName.trim();
     const targetRole = cloudInviteRole;
+    if (!canActorAssignRole(actorRole, targetRole)) {
+      setCloudAccessError(
+        lang === 'ne'
+          ? `अनुमति छैन: ${actorRole || 'Staff'} ले ${targetRole} पद तोक्न मिल्दैन।`
+          : `Permission denied: ${actorRole || 'Staff'} cannot assign role ${targetRole}.`
+      );
+      return;
+    }
     setCloudAccessError(null);
     setIsSendingCloudInvite(true);
     try {
@@ -800,7 +838,8 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
         ownerUid: cloudOwnerUid,
         email: targetEmail,
         staffName: targetName,
-        role: targetRole
+        role: targetRole,
+        actorRole
       });
       recordAudit('CLOUD_STAFF_INVITED', targetEmail, `Invited ${targetEmail} with role ${targetRole}`);
       playChime('success');
@@ -860,11 +899,15 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     await handleCopyStaffInviteShare(`share-${email}`, staffName, email, role);
   };
 
-  const handleRevokeCloudInvite = async (inviteId: string) => {
+  const handleRevokeCloudInvite = async (invite: CloudStaffInvite) => {
+    if (!canActorManageStaffMember(actorRole, invite.role)) {
+      setCloudAccessError(`Permission denied: ${actorRole || 'Staff'} cannot revoke invite for ${invite.role}.`);
+      return;
+    }
     setCloudAccessError(null);
     try {
-      await revokeCloudStaffInvite(business.businessId, inviteId);
-      recordAudit('CLOUD_INVITE_REVOKED', inviteId, 'Revoked pending staff invite', 'WARNING');
+      await revokeCloudStaffInvite(business.businessId, invite.inviteId, actorRole, invite.role);
+      recordAudit('CLOUD_INVITE_REVOKED', invite.inviteId, `Revoked pending staff invite (${invite.role})`, 'WARNING');
       playChime('beep');
       await refreshCloudAccessLists();
     } catch (err: any) {
@@ -873,12 +916,18 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   const handleToggleCloudMemberActive = async (member: CloudMemberRecord) => {
+    if (!canActorManageStaffMember(actorRole, member.role)) {
+      setCloudAccessError(`Permission denied: ${actorRole || 'Staff'} cannot modify ${member.role} status.`);
+      return;
+    }
     setCloudAccessError(null);
     try {
       await updateCloudMemberAccess({
         businessId: business.businessId,
         memberUid: member.uid,
-        updates: { isActive: !member.isActive }
+        updates: { isActive: !member.isActive },
+        actorRole,
+        existingTargetRole: member.role
       });
       recordAudit(
         'CLOUD_MEMBER_STATUS_CHANGED',
@@ -894,12 +943,18 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   const handleUpdateCloudMemberRole = async (member: CloudMemberRecord, nextRole: StaffRole) => {
+    if (!canActorAssignRole(actorRole, nextRole, member.role)) {
+      setCloudAccessError(`Permission denied: ${actorRole || 'Staff'} cannot assign role ${nextRole}.`);
+      return;
+    }
     setCloudAccessError(null);
     try {
       await updateCloudMemberAccess({
         businessId: business.businessId,
         memberUid: member.uid,
-        updates: { role: nextRole }
+        updates: { role: nextRole },
+        actorRole,
+        existingTargetRole: member.role
       });
       recordAudit('CLOUD_MEMBER_ROLE_CHANGED', member.uid, `${member.email} role changed to ${nextRole}`, 'INFO');
       playChime('success');
@@ -955,6 +1010,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const handleResetPinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetPinStaff || newResetPin.length < 4) return;
+    if (!canActorManageStaffMember(actorRole, resetPinStaff.role)) {
+      showBanner(`Permission denied: ${actorRole || 'User'} cannot reset PIN for ${resetPinStaff.role}.`);
+      return;
+    }
     const pinCheck = await validateProductionPin(newResetPin.trim(), appState.staffUsers, { excludeStaffId: resetPinStaff.id });
     if (!pinCheck.isValid) {
       showBanner(pinCheck.error || 'Weak or duplicate PIN is not allowed.');
@@ -982,9 +1041,14 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const handleEditStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
+    const original = appState.staffUsers.find(s => s.id === editingStaff.id);
+    if (!canActorAssignRole(actorRole, editingStaff.role, original?.role)) {
+      showBanner(`Permission denied: ${actorRole || 'User'} cannot assign role ${editingStaff.role}.`);
+      return;
+    }
     const updated = appState.staffUsers.map(s => s.id === editingStaff.id ? editingStaff : s);
     onUpdateAppState(prev => ({ ...prev, staffUsers: updated }));
-    recordAudit('STAFF_PROFILE_UPDATED', editingStaff.id, `Updated details for ${editingStaff.name}`);
+    recordAudit('STAFF_PROFILE_UPDATED', editingStaff.id, `Updated details for ${editingStaff.name} (${editingStaff.role})`);
     playChime('success');
     setEditingStaff(null);
     showBanner(`Staff ${editingStaff.name} profile updated.`);
@@ -1051,7 +1115,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                 {business.businessType.replace(/_/g, ' ')}
               </span>
               <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                Owner Portal
+                {isOwnerOrAdmin ? 'Owner / Admin Portal' : 'Manager Portal'}
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1060,35 +1124,37 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setActiveTab('payments')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors border border-emerald-200 shadow-2xs"
-          >
-            <QrCode className="h-4 w-4 text-emerald-600" />
-            <span>{lang === 'ne' ? 'भुक्तानी QR सेटअप' : 'Payment QRs'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('security')}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-200 shadow-2xs"
-          >
-            <Globe className="h-4 w-4 text-indigo-600" />
-            <span>{lang === 'ne' ? 'वेबसाइट Download लिंक' : 'Website Download Link'}</span>
-          </button>
-
-          {onOpenSetupWizard && (
+        {isOwnerOrAdmin && (
+          <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={onOpenSetupWizard}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
+              type="button"
+              onClick={() => setActiveTab('payments')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors border border-emerald-200 shadow-2xs"
             >
-              <Sparkles className="h-4 w-4 text-amber-300" />
-              <span>Setup Wizard</span>
+              <QrCode className="h-4 w-4 text-emerald-600" />
+              <span>{lang === 'ne' ? 'भुक्तानी QR सेटअप' : 'Payment QRs'}</span>
             </button>
-          )}
-        </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('security')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-200 shadow-2xs"
+            >
+              <Globe className="h-4 w-4 text-indigo-600" />
+              <span>{lang === 'ne' ? 'वेबसाइट Download लिंक' : 'Website Download Link'}</span>
+            </button>
+
+            {onOpenSetupWizard && (
+              <button
+                onClick={onOpenSetupWizard}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
+              >
+                <Sparkles className="h-4 w-4 text-amber-300" />
+                <span>Setup Wizard</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Save Success Banner Notification */}
@@ -1099,38 +1165,40 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
         </div>
       )}
 
-      {/* Main Admin Tab Navigation Bar */}
+      {/* Main Admin / Manager Tab Navigation Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
         {[
-          { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
-          { id: 'profile', label: 'Business Profile', icon: Building2 },
-          { id: 'staff', label: 'Users & Staff', icon: Users },
-          { id: 'roles', label: 'Roles & Permissions', icon: Lock },
-          { id: 'modules', label: 'Modules Control', icon: Layers },
-          { id: 'payments', label: 'Payment Methods', icon: CreditCard },
-          { id: 'receipt', label: 'Receipt Settings', icon: Receipt },
-          { id: 'taxes', label: 'Tax & Charges', icon: Percent },
-          { id: 'notifications', label: 'Notifications', icon: Bell },
-          { id: 'security', label: 'Security & Access', icon: ShieldCheck },
-          { id: 'audit', label: 'Audit Trail', icon: History }
-        ].map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as AdminTab)}
-              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors ${
-                isActive 
-                  ? 'bg-slate-900 text-white shadow-xs' 
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+          { id: 'dashboard', label: 'Dashboard', icon: TrendingUp, adminOnly: false },
+          { id: 'profile', label: 'Business Profile', icon: Building2, adminOnly: true },
+          { id: 'staff', label: 'Users & Staff', icon: Users, adminOnly: false },
+          { id: 'roles', label: 'Roles & Permissions', icon: Lock, adminOnly: true },
+          { id: 'modules', label: 'Modules Control', icon: Layers, adminOnly: true },
+          { id: 'payments', label: 'Payment Methods', icon: CreditCard, adminOnly: true },
+          { id: 'receipt', label: 'Receipt Settings', icon: Receipt, adminOnly: true },
+          { id: 'taxes', label: 'Tax & Charges', icon: Percent, adminOnly: true },
+          { id: 'notifications', label: 'Notifications', icon: Bell, adminOnly: true },
+          { id: 'security', label: 'Security & Access', icon: ShieldCheck, adminOnly: true },
+          { id: 'audit', label: 'Audit Trail', icon: History, adminOnly: false }
+        ]
+          .filter(tab => isOwnerOrAdmin || !tab.adminOnly)
+          .map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as AdminTab)}
+                className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-colors ${
+                  isActive 
+                    ? 'bg-slate-900 text-white shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
       </div>
 
       {/* TAB CONTENT: 1. EXECUTIVE DASHBOARD */}
@@ -1628,38 +1696,267 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                     </td>
 
                     <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => setEditingStaff(staff)}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-                          title="Edit staff profile"
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => { setResetPinStaff(staff); setNewResetPin(''); }}
-                          className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
-                          title="Reset security PIN"
-                        >
-                          <KeyRound className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleToggleStaffStatus(staff)}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            staff.isActive 
-                              ? 'text-rose-600 hover:bg-rose-50' 
-                              : 'text-emerald-600 hover:bg-emerald-50'
-                          }`}
-                          title={staff.isActive ? 'Disable terminal access' : 'Activate staff'}
-                        >
-                          {staff.isActive ? <PauseCircle className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
+                      {canActorManageStaffMember(actorRole, staff.role) ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setEditingStaff(staff)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                            title="Edit staff profile & role"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => { setResetPinStaff(staff); setNewResetPin(''); }}
+                            className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Reset security PIN"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleStaffStatus(staff)}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              staff.isActive 
+                                ? 'text-rose-600 hover:bg-rose-50' 
+                                : 'text-emerald-600 hover:bg-emerald-50'
+                            }`}
+                            title={staff.isActive ? 'Disable terminal access' : 'Activate staff'}
+                          >
+                            {staff.isActive ? <PauseCircle className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-slate-400">
+                          {lang === 'ne' ? 'उच्च पद सुरक्षित' : 'Protected Role'}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Cloud Staff Gmail Role Assignment Panel (Accessible to Both Admin & Manager) */}
+          <div className="pt-4 border-t border-slate-100 space-y-4 text-xs">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {lang === 'ne' ? 'Cloud स्टाफ Gmail तथा भूमिका (Role) व्यवस्थापन' : 'Cloud Staff Gmail & Role Assignment'}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {isOwnerOrAdmin
+                    ? 'Assign Admin, Manager, or operational staff roles to employee Gmail accounts.'
+                    : 'Manager Scope: Assign Cashier, Waiter, Kitchen, Receptionist, or other floor staff roles.'}
+                </p>
+              </div>
+              {cloudSyncConnected && (
+                <button
+                  type="button"
+                  disabled={isLoadingCloudAccess}
+                  onClick={refreshCloudAccessLists}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isLoadingCloudAccess ? 'animate-spin' : ''}`} />
+                  <span>{lang === 'ne' ? 'सूची ताजा गर्नुहोस्' : 'Refresh Cloud Roles'}</span>
+                </button>
+              )}
+            </div>
+
+            {!cloudSyncConnected || !cloudOwnerUid ? (
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-3">
+                <span className="text-slate-600">
+                  {lang === 'ne'
+                    ? 'Cloud बाट स्टाफको Gmail भूमिका सेट गर्न पहिले Email वा Google बाट लग-इन गर्नुहोस्।'
+                    : 'Sign in with a verified Email or Google account to assign Cloud staff roles.'}
+                </span>
+                {onGoogleOwnerConnect && (
+                  <button
+                    type="button"
+                    onClick={() => onGoogleOwnerConnect()}
+                    className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl"
+                  >
+                    {lang === 'ne' ? 'Google लग-इन' : 'Connect Google'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {cloudAccessError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 font-semibold flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>{cloudAccessError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Staff Name *</label>
+                    <input
+                      type="text"
+                      value={cloudInviteName}
+                      onChange={e => setCloudInviteName(e.target.value)}
+                      placeholder="e.g. Sita Waiter"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Staff Email *</label>
+                    <input
+                      type="email"
+                      value={cloudInviteEmail}
+                      onChange={e => setCloudInviteEmail(e.target.value)}
+                      placeholder="staff@gmail.com"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Assigned Role *</label>
+                    <select
+                      value={cloudInviteRole}
+                      onChange={e => setCloudInviteRole(e.target.value as StaffRole)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white font-semibold"
+                    >
+                      {assignableRoles.map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isSendingCloudInvite}
+                    onClick={handleSendCloudInvite}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-bold rounded-xl shadow-2xs inline-flex items-center justify-center gap-1.5"
+                  >
+                    <UserPlus className="h-4 w-4 text-emerald-400" />
+                    <span>{isSendingCloudInvite ? 'Saving...' : 'Authorize & Set Role'}</span>
+                  </button>
+                </div>
+
+                {cloudMembers.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2 px-3">Staff Name</th>
+                          <th className="py-2 px-3">Email</th>
+                          <th className="py-2 px-3">Assigned Role</th>
+                          <th className="py-2 px-3">Status</th>
+                          <th className="py-2 px-3 text-right">Control</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {cloudMembers.map(m => {
+                          const canManageTarget = canActorManageStaffMember(actorRole, m.role);
+                          return (
+                            <tr key={m.uid}>
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{m.name}</td>
+                              <td className="py-2.5 px-3 font-mono text-slate-600">{m.email}</td>
+                              <td className="py-2.5 px-3">
+                                <select
+                                  value={m.role}
+                                  disabled={!canManageTarget}
+                                  onChange={e => handleUpdateCloudMemberRole(m, e.target.value as StaffRole)}
+                                  className="px-2 py-1 border border-slate-200 rounded-lg bg-white font-semibold disabled:bg-slate-100 disabled:text-slate-500"
+                                >
+                                  {defaultRoles
+                                    .filter(r => r === m.role || assignableRoles.includes(r))
+                                    .map(r => (
+                                      <option key={r} value={r}>{r}</option>
+                                    ))}
+                                </select>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  m.isActive ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+                                }`}>
+                                  {m.isActive ? 'Active' : 'Revoked'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                {canManageTarget ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleCloudMemberActive(m)}
+                                    className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                                      m.isActive
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                    }`}
+                                  >
+                                    {m.isActive ? 'Revoke Device' : 'Re-Activate'}
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-400">Protected</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {cloudInvites.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2 px-3">Invited Name</th>
+                          <th className="py-2 px-3">Email</th>
+                          <th className="py-2 px-3">Role</th>
+                          <th className="py-2 px-3">Status</th>
+                          <th className="py-2 px-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {cloudInvites.map(inv => (
+                          <tr key={inv.inviteId}>
+                            <td className="py-2 px-3 font-semibold text-slate-900">{inv.staffName}</td>
+                            <td className="py-2 px-3 font-mono text-slate-600">{inv.email}</td>
+                            <td className="py-2 px-3 font-bold">{inv.role}</td>
+                            <td className="py-2 px-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                inv.status === 'ACTIVE'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : inv.status === 'PENDING'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-rose-50 text-rose-800 border-rose-200'
+                              }`}>
+                                {inv.status}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                {inv.status !== 'REVOKED' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCopyStaffInviteShare(inv.inviteId, inv.staffName, inv.email, inv.role)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+                                  >
+                                    {copiedInviteKey === inv.inviteId ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                    <span>{copiedInviteKey === inv.inviteId ? 'Copied' : 'Copy Link'}</span>
+                                  </button>
+                                )}
+                                {inv.status === 'PENDING' && canActorManageStaffMember(actorRole, inv.role) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevokeCloudInvite(inv)}
+                                    className="px-2.5 py-1 rounded-lg font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                                  >
+                                    Revoke
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -2750,11 +3047,9 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                       onChange={e => setCloudInviteRole(e.target.value as StaffRole)}
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white font-semibold"
                     >
-                      {defaultRoles
-                        .filter(r => r !== 'OWNER' && r !== 'SUPER_ADMIN')
-                        .map(r => (
-                          <option key={r} value={r}>{r}</option>
-                        ))}
+                      {assignableRoles.map(r => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
                     </select>
                   </div>
                   <button
@@ -2841,48 +3136,51 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {cloudMembers.map(m => (
-                            <tr key={m.uid}>
-                              <td className="py-2.5 px-3 font-bold text-slate-900">{m.name}</td>
-                              <td className="py-2.5 px-3 font-mono text-slate-600">{m.email}</td>
-                              <td className="py-2.5 px-3">
-                                <select
-                                  value={m.role}
-                                  disabled={m.role === 'OWNER'}
-                                  onChange={e => handleUpdateCloudMemberRole(m, e.target.value as StaffRole)}
-                                  className="px-2 py-1 border border-slate-200 rounded-lg bg-white font-semibold"
-                                >
-                                  {defaultRoles
-                                    .filter(r => r === m.role || (r !== 'OWNER' && r !== 'SUPER_ADMIN'))
-                                    .map(r => (
-                                      <option key={r} value={r}>{r}</option>
-                                    ))}
-                                </select>
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                  m.isActive ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
-                                }`}>
-                                  {m.isActive ? 'Active' : 'Revoked'}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-right">
-                                {m.role !== 'OWNER' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleCloudMemberActive(m)}
-                                    className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
-                                      m.isActive
-                                        ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                    }`}
+                          {cloudMembers.map(m => {
+                            const canManageTarget = canActorManageStaffMember(actorRole, m.role);
+                            return (
+                              <tr key={m.uid}>
+                                <td className="py-2.5 px-3 font-bold text-slate-900">{m.name}</td>
+                                <td className="py-2.5 px-3 font-mono text-slate-600">{m.email}</td>
+                                <td className="py-2.5 px-3">
+                                  <select
+                                    value={m.role}
+                                    disabled={!canManageTarget}
+                                    onChange={e => handleUpdateCloudMemberRole(m, e.target.value as StaffRole)}
+                                    className="px-2 py-1 border border-slate-200 rounded-lg bg-white font-semibold disabled:bg-slate-100 disabled:text-slate-500"
                                   >
-                                    {m.isActive ? 'Revoke Device' : 'Re-Activate'}
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                                    {defaultRoles
+                                      .filter(r => r === m.role || assignableRoles.includes(r))
+                                      .map(r => (
+                                        <option key={r} value={r}>{r}</option>
+                                      ))}
+                                  </select>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                    m.isActive ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+                                  }`}>
+                                    {m.isActive ? 'Active' : 'Revoked'}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-right">
+                                  {canManageTarget && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleCloudMemberActive(m)}
+                                      className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                                        m.isActive
+                                          ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                      }`}
+                                    >
+                                      {m.isActive ? 'Revoke Device' : 'Re-Activate'}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2933,10 +3231,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                                       <span>{copiedInviteKey === inv.inviteId ? (lang === 'ne' ? 'कपी भयो' : 'Copied') : (lang === 'ne' ? 'लिंक कपी' : 'Copy Link')}</span>
                                     </button>
                                   )}
-                                  {inv.status === 'PENDING' && (
+                                  {inv.status === 'PENDING' && canActorManageStaffMember(actorRole, inv.role) && (
                                     <button
                                       type="button"
-                                      onClick={() => handleRevokeCloudInvite(inv.inviteId)}
+                                      onClick={() => handleRevokeCloudInvite(inv)}
                                       className="px-2.5 py-1 rounded-lg font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
                                     >
                                       Revoke Invite
@@ -3106,7 +3404,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                   onChange={e => setNewStaffRole(e.target.value as StaffRole)}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white"
                 >
-                  {defaultRoles.map(r => (
+                  {assignableRoles.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -3219,7 +3517,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                   onChange={e => setEditingStaff({ ...editingStaff, role: e.target.value as StaffRole })}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white font-semibold text-slate-800"
                 >
-                  {defaultRoles.map(r => (
+                  {assignableRoles.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -3411,6 +3709,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
         businessId={business.businessId}
         businessName={business.businessName}
         currentStaff={{ id: currentSession?.staffId || 'admin', name: currentSession?.name || 'Admin' }}
+        actorRole={actorRole}
         onInvitationCreated={(invite) => {
           onUpdateAppState(prev => ({
             ...prev,

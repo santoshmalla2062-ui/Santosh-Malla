@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, signInWithGooglePopup, signOutFirebase } from './firebase';
+import {
+  auth,
+  formatFirebaseAuthError,
+  sendPasswordReset,
+  sendUserEmailVerification,
+  signInWithEmailPassword,
+  signInWithGooglePopup,
+  signOutFirebase
+} from './firebase';
 import { 
   AppState, 
   BusinessSettings, 
@@ -60,6 +68,9 @@ import {
   INITIAL_BUSINESS_TENANTS 
 } from './services/tenantStorage';
 import { 
+  canActorAssignRole,
+  canActorManageStaff,
+  canActorManageStaffMember,
   clearSession, 
   createAuditLog, 
   getCurrentSession, 
@@ -592,6 +603,103 @@ export default function App() {
       setIsGoogleAuthLoading(false);
     }
   }, [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess]);
+
+  const handleEmailPasswordSignIn = useCallback(
+    async (
+      email: string,
+      password: string,
+      rememberMe: boolean
+    ): Promise<{ success: boolean; error?: string; message?: string }> => {
+      setCloudAuthError(null);
+      explicitGoogleSignInRef.current = true;
+      try {
+        const signedInUser = await signInWithEmailPassword(email, password, rememberMe);
+        if (!signedInUser.emailVerified) {
+          try {
+            await sendUserEmailVerification(signedInUser);
+          } catch {
+            // Best-effort verification trigger
+          }
+          await signOutFirebase();
+          explicitGoogleSignInRef.current = false;
+          const verifyMsg =
+            language === 'ne'
+              ? `तपाईंको इमेल (${signedInUser.email}) अझै प्रमाणित (Verified) भएको छैन। इनबक्समा पठाइएको Verification लिंक क्लिक गरेर पुनः लग-इन गर्नुहोस्।`
+              : `Email (${signedInUser.email}) is not verified yet. We sent a verification link to your inbox — verify it and log in again.`;
+          setCloudAuthError(verifyMsg);
+          return { success: false, error: verifyMsg };
+        }
+
+        if (firebaseUser?.uid === signedInUser.uid) {
+          if (isMasterOwnerUser(signedInUser)) {
+            const creatorStaff: StaffUser = {
+              id: signedInUser.uid,
+              username: signedInUser.email || 'creator',
+              name: signedInUser.displayName || 'App Creator',
+              nepaliName: 'एप क्रिएटर (App Creator)',
+              role: 'SUPER_ADMIN',
+              pinHash: '',
+              salt: 'email-auth',
+              isActive: true,
+              email: signedInUser.email || undefined,
+              businessId: activeBusiness.businessId,
+              createdAt: new Date().toISOString().split('T')[0]
+            };
+            const restored = saveSession(creatorStaff, 120, activeBusiness.businessId);
+            setCurrentSession(restored);
+            setShowLoginModal(false);
+            setActiveTab('dashboard');
+            explicitGoogleSignInRef.current = false;
+          } else if (cloudAccess?.status === 'AUTHORIZED') {
+            const staffObj: StaffUser = {
+              id: signedInUser.uid,
+              username: cloudAccess.email,
+              name: cloudAccess.name,
+              nepaliName: cloudAccess.name,
+              role: cloudAccess.role,
+              pinHash: '',
+              salt: 'email-auth',
+              isActive: true,
+              email: cloudAccess.email,
+              businessId: activeBusiness.businessId,
+              createdAt: new Date().toISOString().split('T')[0]
+            };
+            const restored = saveSession(staffObj, 120, activeBusiness.businessId);
+            setCurrentSession(restored);
+            setShowLoginModal(false);
+            const home = getHomeConfigForRole(cloudAccess.role, activeBusiness.enabledModules);
+            setActiveTab(home.defaultTab);
+            explicitGoogleSignInRef.current = false;
+          }
+        }
+        return { success: true };
+      } catch (err) {
+        explicitGoogleSignInRef.current = false;
+        const msg = formatFirebaseAuthError(err, language);
+        setCloudAuthError(msg);
+        return { success: false, error: msg };
+      }
+    },
+    [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess, language]
+  );
+
+  const handleSendPasswordReset = useCallback(
+    async (email: string): Promise<{ success: boolean; error?: string; message?: string }> => {
+      try {
+        await sendPasswordReset(email);
+        return {
+          success: true,
+          message:
+            language === 'ne'
+              ? `पासवर्ड रिसेट लिंक ${email.trim()} मा पठाइयो। कृपया इमेल जाँच गर्नुहोस्।`
+              : `Password reset link sent to ${email.trim()}. Please check your inbox.`
+        };
+      } catch (err) {
+        return { success: false, error: formatFirebaseAuthError(err, language) };
+      }
+    },
+    [language]
+  );
 
   const handleGoogleSignOut = useCallback(async () => {
     if (cloudUnsubscribeRef.current) {
@@ -3479,16 +3587,54 @@ export default function App() {
 
   const handleUpdateStaffUsers = (users: StaffUser[]) => {
     const userRole = currentSession?.role;
-    if (userRole !== 'ADMIN' && userRole !== 'OWNER' && userRole !== 'SUPER_ADMIN' && userRole !== 'MANAGER') {
-      setSecurityAlert('Permission Denied: Only Manager or Administrator can manage staff accounts.');
+    if (!canActorManageStaff(userRole)) {
+      setSecurityAlert('Permission Denied: Only Admin or Manager can manage staff accounts and assign roles.');
       return;
+    }
+
+    const prevMap = new Map(appStateRef.current.staffUsers.map(u => [u.id, u]));
+    const nextMap = new Map(users.map(u => [u.id, u]));
+
+    for (const nextUser of users) {
+      const prevUser = prevMap.get(nextUser.id);
+      if (!prevUser) {
+        if (!canActorAssignRole(userRole, nextUser.role)) {
+          const msg = `Permission Denied: ${userRole} cannot create or assign role ${nextUser.role}.`;
+          setSecurityAlert(msg);
+          recordAudit('PRIVILEGE_ESCALATION_BLOCKED', nextUser.id, msg, 'CRITICAL');
+          return;
+        }
+      } else {
+        const mutated =
+          prevUser.role !== nextUser.role ||
+          prevUser.isActive !== nextUser.isActive ||
+          prevUser.pinHash !== nextUser.pinHash ||
+          prevUser.name !== nextUser.name ||
+          prevUser.username !== nextUser.username ||
+          prevUser.email !== nextUser.email;
+        if (mutated && !canActorAssignRole(userRole, nextUser.role, prevUser.role)) {
+          const msg = `Permission Denied: ${userRole} cannot modify ${prevUser.role} or escalate to ${nextUser.role}.`;
+          setSecurityAlert(msg);
+          recordAudit('PRIVILEGE_ESCALATION_BLOCKED', nextUser.id, msg, 'CRITICAL');
+          return;
+        }
+      }
+    }
+
+    for (const prevUser of appStateRef.current.staffUsers) {
+      if (!nextMap.has(prevUser.id) && !canActorManageStaffMember(userRole, prevUser.role)) {
+        const msg = `Permission Denied: ${userRole} cannot remove ${prevUser.role} account.`;
+        setSecurityAlert(msg);
+        recordAudit('PRIVILEGE_ESCALATION_BLOCKED', prevUser.id, msg, 'CRITICAL');
+        return;
+      }
     }
 
     setAppState(prev => ({
       ...prev,
       staffUsers: users
     }));
-    recordAudit('STAFF_ACCOUNTS_MUTATED', undefined, `Staff roster updated (${users.length} accounts)`, 'INFO');
+    recordAudit('STAFF_ACCOUNTS_MUTATED', undefined, `Staff roster updated (${users.length} accounts) by ${userRole}`, 'INFO');
   };
 
   const handleToggleSound = () => {
@@ -3938,12 +4084,17 @@ export default function App() {
         staffUsers={appState.staffUsers}
         currentSession={currentSession}
         lang={language}
+        businessName={activeBusiness.businessName}
+        businessLogoUrl={sanitizeBusinessLogoUrl(appState.settings.logoUrl || activeBusiness.logo)}
+        onLanguageChange={setLanguage}
         isMandatory={!currentSession}
         ownerControlLocked={ownerControlLocked}
         cloudUserEmail={firebaseUser?.email || null}
         isGoogleAuthLoading={isGoogleAuthLoading}
         cloudAuthError={cloudAuthError}
         onGoogleSignIn={handleGoogleSignIn}
+        onEmailPasswordSignIn={handleEmailPasswordSignIn}
+        onSendPasswordReset={handleSendPasswordReset}
         onRotateStaffPin={handleRotateStaffPin}
         onAcceptInviteCode={async ({ inviteCode, username, fullName, pin }) => {
           saveTenantAppState(activeBusiness.businessId, appStateRef.current);

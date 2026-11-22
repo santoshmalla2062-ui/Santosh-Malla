@@ -31,6 +31,7 @@ import {
   Order,
   StaffRole
 } from '../types';
+import { canActorAssignRole, canActorManageStaffMember } from './security';
 
 export const MAX_SYNC_CHANNEL_BYTES = 550_000;
 
@@ -1345,6 +1346,7 @@ export async function createCloudStaffInvite(params: {
   email: string;
   staffName: string;
   role: StaffRole;
+  actorRole?: StaffRole;
 }): Promise<CloudStaffInvite> {
   const cleanEmail = normalizeEmail(params.email);
   if (!cleanEmail || !cleanEmail.includes('@') || cleanEmail.length < 5 || cleanEmail.length > 128) {
@@ -1356,6 +1358,9 @@ export async function createCloudStaffInvite(params: {
   }
   if (params.role === 'OWNER' || params.role === 'SUPER_ADMIN') {
     throw new Error('Cannot issue OWNER or SUPER_ADMIN invites. Master Owner stays locked to you.');
+  }
+  if (params.actorRole && !canActorAssignRole(params.actorRole, params.role)) {
+    throw new Error(`Permission denied: ${params.actorRole} cannot assign role ${params.role}.`);
   }
 
   const inviteId = `inv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1382,7 +1387,15 @@ export async function createCloudStaffInvite(params: {
   }
 }
 
-export async function revokeCloudStaffInvite(businessId: string, inviteId: string): Promise<void> {
+export async function revokeCloudStaffInvite(
+  businessId: string,
+  inviteId: string,
+  actorRole?: StaffRole,
+  existingInviteRole?: StaffRole
+): Promise<void> {
+  if (actorRole && existingInviteRole && !canActorManageStaffMember(actorRole, existingInviteRole)) {
+    throw new Error(`Permission denied: ${actorRole} cannot revoke invite for ${existingInviteRole}.`);
+  }
   const path = `businesses/${businessId}/invites/${inviteId}`;
   try {
     await updateDoc(doc(db, 'businesses', businessId, 'invites', inviteId), {
@@ -1398,9 +1411,17 @@ export async function updateCloudMemberAccess(params: {
   businessId: string;
   memberUid: string;
   updates: { isActive?: boolean; role?: StaffRole; name?: string };
+  actorRole?: StaffRole;
+  existingTargetRole?: StaffRole;
 }): Promise<void> {
   if (params.updates.role === 'OWNER' || params.updates.role === 'SUPER_ADMIN') {
     throw new Error('Cannot escalate staff member to OWNER role.');
+  }
+  if (params.actorRole && params.existingTargetRole && !canActorManageStaffMember(params.actorRole, params.existingTargetRole)) {
+    throw new Error(`Permission denied: ${params.actorRole} cannot modify ${params.existingTargetRole} access.`);
+  }
+  if (params.actorRole && params.updates.role && !canActorAssignRole(params.actorRole, params.updates.role, params.existingTargetRole)) {
+    throw new Error(`Permission denied: ${params.actorRole} cannot assign role ${params.updates.role}.`);
   }
   const path = `businesses/${params.businessId}/members/${params.memberUid}`;
   try {

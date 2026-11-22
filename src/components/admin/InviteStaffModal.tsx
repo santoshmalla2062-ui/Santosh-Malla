@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { StaffInvitation, StaffRole, StaffUser } from '../../types';
 import { acceptStaffInvitation, createStaffInvitation } from '../../services/tenantStorage';
+import { canActorAssignRole, getAssignableRolesForActor } from '../../services/security';
 import { buildAppDownloadUrl, resolveDefaultPublicAppUrl } from '../../utils/distribution';
 
 interface InviteStaffModalProps {
@@ -23,6 +24,7 @@ interface InviteStaffModalProps {
   businessId: string;
   businessName: string;
   currentStaff: { id: string; name: string };
+  actorRole?: StaffRole;
   onInvitationCreated: (invitation: StaffInvitation) => void;
   onStaffActivated?: (newStaff: StaffUser) => void;
 }
@@ -33,11 +35,15 @@ export const InviteStaffModal: React.FC<InviteStaffModalProps> = ({
   businessId,
   businessName,
   currentStaff,
+  actorRole,
   onInvitationCreated,
   onStaffActivated
 }) => {
+  const assignableRoles = getAssignableRolesForActor(actorRole || 'ADMIN');
   const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [selectedRole, setSelectedRole] = useState<StaffRole>('WAITER');
+  const [selectedRole, setSelectedRole] = useState<StaffRole>(() =>
+    assignableRoles.includes('WAITER') ? 'WAITER' : (assignableRoles[0] || 'STAFF')
+  );
   const [error, setError] = useState<string | null>(null);
   const [createdInvite, setCreatedInvite] = useState<StaffInvitation | null>(null);
   const [copied, setCopied] = useState(false);
@@ -56,6 +62,10 @@ export const InviteStaffModal: React.FC<InviteStaffModalProps> = ({
     e.preventDefault();
     if (!emailOrPhone.trim()) {
       setError('Please provide an email address or mobile phone number.');
+      return;
+    }
+    if (actorRole && !canActorAssignRole(actorRole, selectedRole)) {
+      setError(`Permission denied: ${actorRole} cannot invite staff with role ${selectedRole}.`);
       return;
     }
 
@@ -126,8 +136,9 @@ export const InviteStaffModal: React.FC<InviteStaffModalProps> = ({
     }
   };
 
-  const rolesList: { role: StaffRole; label: string; desc: string }[] = [
-    { role: 'MANAGER', label: 'Branch Manager', desc: 'Full business operations, discounts, day close & reporting' },
+  const allRolesCatalog: { role: StaffRole; label: string; desc: string }[] = [
+    { role: 'ADMIN', label: 'Business Administrator', desc: 'All business modules, staff management & configurations' },
+    { role: 'MANAGER', label: 'Branch Manager', desc: 'Full business operations, staff scheduling, discounts & day close' },
     { role: 'CASHIER', label: 'Cashier / Counter Staff', desc: 'POS billing, receipts, cash collection & KOT routing' },
     { role: 'WAITER', label: 'Floor Service Staff', desc: 'Table ordering, KOT entry & room charge requests' },
     { role: 'KITCHEN', label: 'Kitchen & Bar Chef', desc: 'Kitchen display screen, order readiness & KOT status' },
@@ -135,8 +146,9 @@ export const InviteStaffModal: React.FC<InviteStaffModalProps> = ({
     { role: 'HOUSEKEEPING', label: 'Housekeeping Staff', desc: 'Room cleaning status, linen changes & inspections' },
     { role: 'ACCOUNTANT', label: 'Accountant', desc: 'Expenses, day closes, ledger audits & tax exports' },
     { role: 'INVENTORY_STAFF', label: 'Inventory Controller', desc: 'Stock in/out, purchase bills & supplier logs' },
-    { role: 'ADMIN', label: 'Business Administrator', desc: 'All business modules, staff management & configurations' }
+    { role: 'STAFF', label: 'General Staff', desc: 'Basic floor POS order taking & table checks' }
   ];
+  const rolesList = allRolesCatalog.filter(r => assignableRoles.includes(r.role));
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
