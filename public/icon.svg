@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#0F172A"/>
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="#1E293B" stroke="#10B981" stroke-width="8" stroke-opacity="0.35"/>
+  <!-- Stylized Himalayan Peaks -->
+  <path d="M96 340L196 168L268 276L330 198L416 340H96Z" fill="#10B981"/>
+  <path d="M196 168L244 240L210 264L168 216L196 168Z" fill="#ECFDF5"/>
+  <path d="M330 198L370 264L340 278L308 228L330 198Z" fill="#ECFDF5"/>
+  <!-- Warm Sun / Hospitality Circle -->
+  <circle cx="354" cy="142" r="34" fill="#F59E0B"/>
+  <!-- Clean POS Underline Accent -->
+  <rect x="118" y="366" width="276" height="22" rx="11" fill="#F8FAFC" fill-opacity="0.92"/>
+</svg>

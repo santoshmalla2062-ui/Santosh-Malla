@@ -1,0 +1,7 @@
+{
+  "name": "Himalayan Breeze - Cafe, Restaurant & Resort Management",
+  "description": "Comprehensive billing POS, inventory tracking, resort room and table management, customer Khata ledger, and sales analytics suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

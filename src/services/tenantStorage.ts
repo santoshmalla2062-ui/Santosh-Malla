@@ -1,0 +1,1239 @@
+import { 
+  AppState, 
+  AppModule, 
+  BusinessStatus, 
+  BusinessTenant, 
+  BusinessType, 
+  StaffRole, 
+  StaffUser,
+  StaffInvitation,
+  PaymentMethodConfig,
+  ReceiptSettings,
+  UserBusinessMembership,
+  BusinessSettings,
+  MenuItem,
+  TableRoom,
+  InventoryItem,
+  Customer
+} from '../types';
+import { 
+  getInitialAppState, 
+  INITIAL_MENU_ITEMS, 
+  INITIAL_TABLES_ROOMS, 
+  INITIAL_ORDERS, 
+  INITIAL_INVENTORY, 
+  INITIAL_CUSTOMERS, 
+  INITIAL_EXPENSES, 
+  INITIAL_DAY_CLOSINGS, 
+  INITIAL_STAFF_USERS, 
+  INITIAL_AUDIT_LOGS, 
+  INITIAL_ROOM_TYPES, 
+  INITIAL_RESORT_ROOMS, 
+  INITIAL_GUEST_PROFILES, 
+  INITIAL_RESERVATIONS, 
+  INITIAL_GUEST_FOLIOS, 
+  INITIAL_RESORT_SERVICES, 
+  INITIAL_HOUSEKEEPING_TASKS, 
+  INITIAL_MAINTENANCE_ISSUES, 
+  INITIAL_HOTEL_PAYMENTS,
+  DEFAULT_SETTINGS,
+  STORAGE_KEY
+} from './storage';
+import { createStaffAccount } from './security';
+import { createCleanChartOfAccounts, ensureDefaultChartAccounts } from './accounting';
+
+export const BUSINESSES_REGISTRY_KEY = 'hb_businesses_registry_v1';
+export const MEMBERSHIPS_REGISTRY_KEY = 'hb_memberships_registry_v1';
+export const ACTIVE_BUSINESS_ID_KEY = 'hb_active_business_id';
+export const TENANT_STORAGE_PREFIX = 'hb_tenant_data_';
+
+export const ALL_APP_MODULES: AppModule[] = [
+  'pos', 
+  'billing',
+  'tables_rooms', 
+  'resort', 
+  'kds', 
+  'inventory', 
+  'customers', 
+  'day_closing', 
+  'reports', 
+  'settings',
+  'business_admin'
+];
+
+export const DEFAULT_PAYMENT_METHODS: PaymentMethodConfig[] = [
+  { id: 'pm-cash', name: 'Cash', enabled: true, type: 'cash', instructions: 'Physical cash drawer payment' },
+  { id: 'pm-card', name: 'Credit / Debit Card', enabled: true, type: 'card', instructions: 'POS swipe / contactless card terminal' },
+  { id: 'pm-fonepay', name: 'Fonepay QR', enabled: true, type: 'fonepay_qr', accountDetails: 'Merchant Dynamic QR' },
+  { id: 'pm-bank', name: 'Bank Transfer', enabled: true, type: 'bank_transfer', accountDetails: 'A/C: 019283749281' },
+  { id: 'pm-esewa', name: 'eSewa Mobile Wallet', enabled: true, type: 'esewa', accountDetails: 'eSewa ID: 9841234567' },
+  { id: 'pm-khalti', name: 'Khalti Wallet', enabled: true, type: 'khalti', accountDetails: 'Khalti ID: 9856012345' },
+  { id: 'pm-room', name: 'Charge to Room', enabled: true, type: 'charge_to_room', instructions: 'Charge bill to active guest room folio' }
+];
+
+export const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  receiptTitle: '',
+  headerSubtitle: '',
+  showLogo: true,
+  showPanVat: true,
+  showCustomerDetails: true,
+  showTaxBreakdown: true,
+  showQrCode: true,
+  invoicePrefix: 'INV-',
+  footerMessage: 'Thank you for your business! Please visit us again.',
+  printWidth: '80mm'
+};
+
+export const DEFAULT_MODULES_BY_TYPE: Record<BusinessType, AppModule[]> = {
+  CAFE: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  RESTAURANT: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  RESORT: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  HOTEL: ['pos', 'billing', 'tables_rooms', 'resort', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  CAFE_RESTAURANT: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  RESTAURANT_RESORT: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  CAFE_RESTAURANT_RESORT: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+  OTHER: ['pos', 'billing', 'tables_rooms', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin']
+};
+
+export const INITIAL_BUSINESS_TENANTS: BusinessTenant[] = [
+  {
+    businessId: 'biz-himalayan-breeze',
+    businessName: 'Himalayan Breeze Cafe & Resort',
+    nepaliBusinessName: 'हिमालयन ब्रीज क्याफे तथा रिसोर्ट',
+    tagline: 'Premier Lakeside Boutique Hospitality & Fine Dining',
+    businessType: 'CAFE_RESTAURANT_RESORT',
+    ownerId: 'staff-admin-sys',
+    ownerName: 'Owner / General Manager',
+    logo: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=120&q=80',
+    phone: '+977 61 465890',
+    email: 'info@himalayanbreeze.com.np',
+    address: 'Lakeside-6, Pokhara, Gandaki, Nepal',
+    panVatNumber: '601928374',
+    status: 'ACTIVE',
+    enabledModules: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
+    currencySymbol: 'Rs.',
+    environment: 'demo',
+    templateType: 'starter',
+    createdAt: '2026-09-01',
+    updatedAt: '2026-10-02'
+  },
+  {
+    businessId: 'biz-annapurna-coffee',
+    businessName: 'Annapurna Specialty Coffee & Bakery',
+    nepaliBusinessName: 'अन्नपूर्ण स्पेसियालिटी कफी तथा बेकरी',
+    tagline: 'Artisanal Himalayan Single-Origin Brews & Fresh Pastries',
+    businessType: 'CAFE',
+    ownerId: 'staff-bikash-coffee',
+    ownerName: 'Bikash Gurung',
+    logo: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=120&q=80',
+    phone: '+977 61 520112',
+    email: 'hello@annapurnacoffee.np',
+    address: 'Middle Path, Lakeside, Pokhara, Nepal',
+    panVatNumber: '302918234',
+    status: 'ACTIVE',
+    enabledModules: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
+    currencySymbol: 'Rs.',
+    createdAt: '2026-09-15',
+    updatedAt: '2026-10-01'
+  },
+  {
+    businessId: 'biz-phewa-dining',
+    businessName: 'Phewa Lakeside Fine Dine Restaurant',
+    nepaliBusinessName: 'फेवा लेकसाइड फाइन डाइन रेस्टुरेन्ट',
+    tagline: 'Authentic Thakali, Tandoori & Continental Gourmet Delights',
+    businessType: 'RESTAURANT',
+    ownerId: 'staff-pooja-dine',
+    ownerName: 'Pooja Shrestha',
+    logo: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=120&q=80',
+    phone: '+977 61 462319',
+    email: 'contact@phewalakesidedine.com',
+    address: 'Barahi Chowk, Baidam, Pokhara, Nepal',
+    panVatNumber: '501829402',
+    status: 'ACTIVE',
+    enabledModules: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
+    currencySymbol: 'Rs.',
+    createdAt: '2026-09-20',
+    updatedAt: '2026-10-02'
+  },
+  {
+    businessId: 'biz-mugu-resort',
+    businessName: 'Mugu Luxury Mountain Resort',
+    nepaliBusinessName: 'मुगु लक्जरी माउन्टेन रिसोर्ट',
+    tagline: 'Rara Lake Alpine Sanctuary & Mountain Hospitality',
+    businessType: 'RESORT',
+    ownerId: 'staff-rara-owner',
+    ownerName: 'Pasang Sherpa',
+    logo: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=120&q=80',
+    phone: '+977 87 520011',
+    email: 'contact@muguresort.com.np',
+    address: 'Rara National Park Buffer Zone, Mugu, Karnali, Nepal',
+    panVatNumber: '702819401',
+    status: 'ACTIVE',
+    enabledModules: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+    currencySymbol: 'Rs.',
+    createdAt: '2026-09-25',
+    updatedAt: '2026-10-03'
+  }
+];
+
+export const INITIAL_MEMBERSHIPS: UserBusinessMembership[] = [
+  // Super Admin has access across all businesses
+  {
+    id: 'mem-super-1',
+    userId: 'staff-super-admin',
+    businessId: 'biz-himalayan-breeze',
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'mem-super-2',
+    userId: 'staff-super-admin',
+    businessId: 'biz-annapurna-coffee',
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'mem-super-3',
+    userId: 'staff-super-admin',
+    businessId: 'biz-phewa-dining',
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    createdAt: '2026-09-01'
+  },
+  {
+    id: 'mem-super-4',
+    userId: 'staff-super-admin',
+    businessId: 'biz-mugu-resort',
+    role: 'SUPER_ADMIN',
+    status: 'ACTIVE',
+    createdAt: '2026-09-01'
+  },
+  // Default Admin User on Himalayan Breeze
+  {
+    id: 'mem-hb-admin',
+    userId: 'staff-admin-sys',
+    businessId: 'biz-himalayan-breeze',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    createdAt: '2026-09-01'
+  }
+];
+
+const DELETED_BUSINESSES_KEY = 'himalayan_breeze_deleted_biz_v1';
+
+export function getDeletedBusinessIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(DELETED_BUSINESSES_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set();
+}
+
+export function deleteBusiness(businessId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const current = getRegisteredBusinesses();
+    const updated = current.filter(b => b.businessId !== businessId);
+    saveRegisteredBusinesses(updated);
+    const deleted = getDeletedBusinessIds();
+    deleted.add(businessId);
+    localStorage.setItem(DELETED_BUSINESSES_KEY, JSON.stringify(Array.from(deleted)));
+    return true;
+  } catch (e) {
+    console.error('Failed to delete business', e);
+    return false;
+  }
+}
+
+export function getRegisteredBusinesses(): BusinessTenant[] {
+  if (typeof window === 'undefined') return INITIAL_BUSINESS_TENANTS;
+  const deletedIds = getDeletedBusinessIds();
+  try {
+    const raw = localStorage.getItem(BUSINESSES_REGISTRY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Filter out any explicitly deleted businesses
+        const filtered = parsed.filter((b: any) => !deletedIds.has(b.businessId));
+        return filtered.length > 0 ? filtered : [INITIAL_BUSINESS_TENANTS[0]];
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read businesses registry', e);
+  }
+  
+  // Seed initial registry (excluding any deleted)
+  const initialFiltered = INITIAL_BUSINESS_TENANTS.filter(b => !deletedIds.has(b.businessId));
+  try {
+    localStorage.setItem(BUSINESSES_REGISTRY_KEY, JSON.stringify(initialFiltered));
+  } catch {
+    // ignore
+  }
+  return initialFiltered.length > 0 ? initialFiltered : [INITIAL_BUSINESS_TENANTS[0]];
+}
+
+export function saveRegisteredBusinesses(businesses: BusinessTenant[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(BUSINESSES_REGISTRY_KEY, JSON.stringify(businesses));
+  } catch (e) {
+    console.error('Failed to save businesses registry', e);
+  }
+}
+
+export function getMemberships(): UserBusinessMembership[] {
+  if (typeof window === 'undefined') return INITIAL_MEMBERSHIPS;
+  try {
+    const raw = localStorage.getItem(MEMBERSHIPS_REGISTRY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Failed to read memberships registry', e);
+  }
+  return INITIAL_MEMBERSHIPS;
+}
+
+export function saveMemberships(memberships: UserBusinessMembership[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(MEMBERSHIPS_REGISTRY_KEY, JSON.stringify(memberships));
+  } catch (e) {
+    console.error('Failed to save memberships registry', e);
+  }
+}
+
+export function getActiveBusinessId(): string {
+  if (typeof window === 'undefined') return 'biz-himalayan-breeze';
+  try {
+    const stored = localStorage.getItem(ACTIVE_BUSINESS_ID_KEY);
+    if (stored) return stored;
+  } catch {
+    // ignore
+  }
+  return 'biz-himalayan-breeze';
+}
+
+export function setActiveBusinessId(businessId: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(ACTIVE_BUSINESS_ID_KEY, businessId);
+  } catch (e) {
+    console.error('Failed to set active business ID', e);
+  }
+}
+
+export function getActiveBusiness(): BusinessTenant {
+  const businesses = getRegisteredBusinesses();
+  const activeId = getActiveBusinessId();
+  const found = businesses.find(b => b.businessId === activeId);
+  if (found) return found;
+  return businesses[0] || INITIAL_BUSINESS_TENANTS[0];
+}
+
+/**
+ * Returns list of businesses that a user has permission to access.
+ * If user role is SUPER_ADMIN, they have access to all registered businesses.
+ */
+export function getBusinessesForUser(userId: string, role?: StaffRole): BusinessTenant[] {
+  const allBusinesses = getRegisteredBusinesses();
+  if (role === 'SUPER_ADMIN') {
+    return allBusinesses;
+  }
+
+  const memberships = getMemberships();
+  const userMemberships = memberships.filter(m => (m.userId === userId || m.role === 'SUPER_ADMIN') && m.status === 'ACTIVE');
+  const allowedIds = new Set(userMemberships.map(m => m.businessId));
+
+  // If user is owner/creator of a business
+  allBusinesses.forEach(b => {
+    if (b.ownerId === userId) {
+      allowedIds.add(b.businessId);
+    }
+  });
+
+  // If user is admin or manager and no specific memberships exist yet, allow access to default business
+  if (allowedIds.size === 0) {
+    allowedIds.add('biz-himalayan-breeze');
+  }
+
+  return allBusinesses.filter(b => allowedIds.has(b.businessId));
+}
+
+export function canUserAccessBusiness(user: { id: string; role?: StaffRole; businessId?: string }, businessId: string): boolean {
+  if (user.role === 'SUPER_ADMIN') return true;
+  if (user.businessId && user.businessId === businessId) return true;
+  const allowed = getBusinessesForUser(user.id, user.role);
+  return allowed.some(b => b.businessId === businessId);
+}
+
+function ensureTenantDefaults(state: AppState, businessId: string): AppState {
+  if (!state.settings) state.settings = { ...DEFAULT_SETTINGS, businessId };
+  if (!state.settings.paymentMethodsConfig || state.settings.paymentMethodsConfig.length === 0) {
+    state.settings.paymentMethodsConfig = DEFAULT_PAYMENT_METHODS;
+  }
+  if (!state.settings.receiptSettings) {
+    state.settings.receiptSettings = { ...DEFAULT_RECEIPT_SETTINGS, receiptTitle: state.settings.businessName };
+  }
+  if (!state.staffInvitations) {
+    state.staffInvitations = [];
+  }
+  if (!state.roomTypes) state.roomTypes = [];
+  if (!state.resortRooms) state.resortRooms = [];
+  if (!state.guestProfiles) state.guestProfiles = [];
+  if (!state.reservations) state.reservations = [];
+  if (!state.guestFolioItems) state.guestFolioItems = [];
+  if (!state.resortServices) state.resortServices = [];
+  if (!state.housekeepingTasks) state.housekeepingTasks = [];
+  if (!state.maintenanceIssues) state.maintenanceIssues = [];
+  if (!state.hotelPayments) state.hotelPayments = [];
+  if (!state.nightAudits) state.nightAudits = [];
+  if (!state.stockMovements) state.stockMovements = [];
+  if (!state.recipes) state.recipes = [];
+  if (!state.suppliers) state.suppliers = [];
+  if (!state.purchaseOrders) state.purchaseOrders = [];
+  if (!state.supplierPayables) state.supplierPayables = [];
+  if (!state.supplierPayments) state.supplierPayments = [];
+  if (!state.receivables) state.receivables = [];
+  if (!state.settings.printerSettings) {
+    state.settings.printerSettings = {
+      connectionType: 'browser',
+      paperWidth: state.settings.receiptSettings?.printWidth === '58mm' ? '58mm' : '80mm',
+      baudRate: 9600,
+      bridgeUrl: 'http://127.0.0.1:9100/print',
+      autoPrintReceipt: false,
+      autoPrintKot: false,
+      autoOpenCashDrawerOnCash: true,
+      drawerKickPin: 0
+    };
+  }
+  if (!state.settings.irdSettings) {
+    state.settings.irdSettings = {
+      cbmsEnabled: false,
+      strictTaxInvoiceLock: true
+    };
+  }
+  if (!state.cashRegisters) state.cashRegisters = [];
+  if (!state.accounts || state.accounts.length === 0) {
+    state.accounts = createCleanChartOfAccounts(businessId);
+  } else {
+    state.accounts = ensureDefaultChartAccounts(state.accounts, businessId);
+  }
+  if (!state.journalEntries) state.journalEntries = [];
+  if (!state.creditNotes) state.creditNotes = [];
+  if (!state.paymentReconciliations) state.paymentReconciliations = [];
+  if (!state.financialPeriods) {
+    const currentYear = new Date().getFullYear();
+    state.financialPeriods = [
+      {
+        id: `period-${currentYear}-01`,
+        businessId,
+        periodName: `Fiscal Q1 ${currentYear}`,
+        startDate: `${currentYear}-01-01`,
+        endDate: `${currentYear}-03-31`,
+        status: 'OPEN'
+      }
+    ];
+  }
+  return { ...state, businessId };
+}
+
+/**
+ * Loads isolated AppState for a specific businessId.
+ */
+export function loadTenantAppState(businessId: string): AppState {
+  if (typeof window === 'undefined') {
+    return ensureTenantDefaults(getInitialAppState(), businessId);
+  }
+
+  // 1. If Himalayan Breeze and legacy STORAGE_KEY exists, migrate or load it
+  if (businessId === 'biz-himalayan-breeze') {
+    const tenantKey = TENANT_STORAGE_PREFIX + businessId;
+    const rawTenant = localStorage.getItem(tenantKey);
+    if (rawTenant) {
+      try {
+        const parsed = JSON.parse(rawTenant);
+        return ensureTenantDefaults(parsed, businessId);
+      } catch {
+        // fallback
+      }
+    }
+
+    // Try legacy key
+    const rawLegacy = localStorage.getItem(STORAGE_KEY);
+    if (rawLegacy) {
+      try {
+        const parsedLegacy = JSON.parse(rawLegacy);
+        parsedLegacy.businessId = businessId;
+        const defaulted = ensureTenantDefaults(parsedLegacy, businessId);
+        // Save into tenant key
+        localStorage.setItem(tenantKey, JSON.stringify(defaulted));
+        return defaulted;
+      } catch {
+        // fallback
+      }
+    }
+
+    const initialHB = ensureTenantDefaults(getInitialAppState(), businessId);
+    initialHB.businessId = businessId;
+    localStorage.setItem(tenantKey, JSON.stringify(initialHB));
+    return initialHB;
+  }
+
+  // 2. For other businesses, load from tenant storage
+  const tenantKey = TENANT_STORAGE_PREFIX + businessId;
+  const raw = localStorage.getItem(tenantKey);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.menuItems) {
+        return ensureTenantDefaults(parsed, businessId);
+      }
+    } catch {
+      // fallback to generated template
+    }
+  }
+
+  // 3. Generate initial template for this business
+  const business = getRegisteredBusinesses().find(b => b.businessId === businessId);
+  const starter = createStarterStateForBusinessType(business || {
+    businessId,
+    businessName: 'Business ' + businessId,
+    businessType: 'CAFE',
+    ownerId: 'owner',
+    ownerName: 'Owner',
+    phone: '',
+    email: '',
+    address: '',
+    status: 'ACTIVE',
+    enabledModules: ['pos', 'tables_rooms', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
+    currencySymbol: 'Rs.',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const defaultedStarter = ensureTenantDefaults(starter, businessId);
+  try {
+    localStorage.setItem(tenantKey, JSON.stringify(defaultedStarter));
+  } catch {
+    // ignore
+  }
+
+  return defaultedStarter;
+}
+
+/**
+ * Creates and registers a new staff invitation for a specific business
+ */
+export function createStaffInvitation(
+  businessId: string,
+  businessName: string,
+  emailOrPhone: string,
+  role: StaffRole,
+  inviter: { id: string; name: string },
+  permissions?: string[]
+): StaffInvitation {
+  const code = 'INV-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+  const invitation: StaffInvitation = {
+    id: 'invite-' + Date.now().toString(36),
+    businessId,
+    businessName,
+    emailOrPhone: emailOrPhone.trim(),
+    role,
+    permissions,
+    invitedByName: inviter.name,
+    invitedByStaffId: inviter.id,
+    createdAt: new Date().toISOString().split('T')[0],
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'PENDING',
+    inviteCode: code
+  };
+
+  const state = loadTenantAppState(businessId);
+  state.staffInvitations = [invitation, ...(state.staffInvitations || [])];
+  saveTenantAppState(businessId, state);
+
+  return invitation;
+}
+
+/**
+ * Accepts a staff invitation, creating a new StaffUser associated with that business
+ */
+export async function acceptStaffInvitation(
+  businessId: string,
+  inviteCode: string,
+  username: string,
+  fullName: string,
+  pin: string
+): Promise<{ success: boolean; error?: string; staffUser?: StaffUser }> {
+  const state = loadTenantAppState(businessId);
+  const invitations = state.staffInvitations || [];
+  const invite = invitations.find(i => i.inviteCode === inviteCode.trim().toUpperCase() && i.businessId === businessId);
+
+  if (!invite) {
+    return { success: false, error: 'Invalid invitation code or invitation not found for this business.' };
+  }
+
+  if (invite.status !== 'PENDING') {
+    return { success: false, error: `This invitation is already ${invite.status.toLowerCase()}.` };
+  }
+
+  // Create staff user account
+  const newStaff = await createStaffAccount(username, fullName, fullName, invite.role, pin);
+  newStaff.businessId = businessId;
+  newStaff.email = invite.emailOrPhone.includes('@') ? invite.emailOrPhone : undefined;
+  newStaff.phone = !invite.emailOrPhone.includes('@') ? invite.emailOrPhone : undefined;
+  newStaff.permissions = invite.permissions;
+
+  // Update invite status
+  invite.status = 'ACCEPTED';
+
+  // Save to tenant state
+  state.staffUsers = [...state.staffUsers, newStaff];
+  state.staffInvitations = invitations;
+  saveTenantAppState(businessId, state);
+
+  // Record membership
+  const memberships = getMemberships();
+  memberships.push({
+    id: 'mem-' + Date.now().toString(36),
+    userId: newStaff.id,
+    businessId,
+    role: invite.role,
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString().split('T')[0]
+  });
+  saveMemberships(memberships);
+
+  return { success: true, staffUser: newStaff };
+}
+
+/**
+ * Revokes a pending staff invitation
+ */
+export function revokeStaffInvitation(businessId: string, invitationId: string): boolean {
+  const state = loadTenantAppState(businessId);
+  const invitations = state.staffInvitations || [];
+  const invite = invitations.find(i => i.id === invitationId && i.businessId === businessId);
+  if (!invite) return false;
+
+  invite.status = 'REVOKED';
+  state.staffInvitations = invitations;
+  saveTenantAppState(businessId, state);
+  return true;
+}
+
+/**
+ * Saves isolated AppState for a specific businessId.
+ */
+export function saveTenantAppState(businessId: string, state: AppState): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    // Multi-tenant partition integrity guard: Prevent cross-tenant state overwrites
+    if (state.businessId && state.businessId !== businessId) {
+      console.warn(`[Multi-Tenant Security] Rejected state save: State belongs to tenant "${state.businessId}" but target partition is "${businessId}".`);
+      return false;
+    }
+
+    const tenantKey = TENANT_STORAGE_PREFIX + businessId;
+    const cleanState = { ...state, businessId };
+    localStorage.setItem(tenantKey, JSON.stringify(cleanState));
+    
+    // Also sync to legacy key if it is default business for backward compatibility
+    if (businessId === 'biz-himalayan-breeze') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanState));
+    }
+    return true;
+  } catch (err) {
+    console.error(`Failed to save state for tenant ${businessId}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Registers a brand-new business tenant, generates isolated initial data,
+ * and records user membership.
+ */
+export function registerNewBusiness(input: {
+  businessName: string;
+  nepaliBusinessName?: string;
+  tagline?: string;
+  businessType: BusinessType;
+  phone: string;
+  email: string;
+  address: string;
+  panVatNumber?: string;
+  ownerId: string;
+  ownerName: string;
+  logo?: string;
+  enabledModules?: AppModule[];
+  environment?: 'production' | 'demo';
+  templateType?: 'starter' | 'clean_slate';
+}): { business: BusinessTenant; state: AppState } {
+  const businesses = getRegisteredBusinesses();
+  const duplicate = businesses.find(b => b.businessName.toLowerCase().trim() === input.businessName.toLowerCase().trim());
+  if (duplicate) {
+    throw new Error(`A business workspace named "${input.businessName.trim()}" is already registered. Please provide a unique business name or branch title.`);
+  }
+
+  const businessId = 'biz-' + input.businessType.toLowerCase() + '-' + Date.now().toString(36);
+  const now = new Date().toISOString().split('T')[0];
+
+  const enabledModules = input.enabledModules && input.enabledModules.length > 0 
+    ? input.enabledModules 
+    : DEFAULT_MODULES_BY_TYPE[input.businessType] || ALL_APP_MODULES;
+
+  const templateType = input.templateType || 'starter';
+  const environment = input.environment || 'production';
+
+  const newBusiness: BusinessTenant = {
+    businessId,
+    businessName: input.businessName.trim(),
+    nepaliBusinessName: input.nepaliBusinessName?.trim(),
+    tagline: input.tagline?.trim() || `${input.businessName} - Quality Hospitality & Service`,
+    businessType: input.businessType,
+    ownerId: input.ownerId,
+    ownerName: input.ownerName,
+    logo: input.logo || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=120&q=80',
+    phone: input.phone.trim(),
+    email: input.email.trim(),
+    address: input.address.trim(),
+    panVatNumber: input.panVatNumber?.trim() || '600000000',
+    status: 'ACTIVE',
+    enabledModules,
+    currencySymbol: 'Rs.',
+    environment,
+    templateType,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  // 1. Add to business registry
+  businesses.push(newBusiness);
+  saveRegisteredBusinesses(businesses);
+
+  // 2. Add owner membership
+  const memberships = getMemberships();
+  memberships.push({
+    id: 'mem-' + Date.now().toString(36),
+    userId: input.ownerId,
+    businessId,
+    role: 'OWNER',
+    status: 'ACTIVE',
+    createdAt: now
+  });
+  saveMemberships(memberships);
+
+  // 3. Create isolated initial state
+  const initialState = createStarterStateForBusinessType(newBusiness);
+  if (templateType === 'clean_slate') {
+    initialState.menuItems = [];
+    initialState.tablesRooms = [];
+    initialState.inventoryItems = [];
+    initialState.inventoryLogs = [];
+    initialState.customers = [];
+    initialState.orders = [];
+    initialState.expenses = [];
+    initialState.dayClosings = [];
+    initialState.khataTransactions = [];
+    initialState.roomTypes = [];
+    initialState.resortRooms = [];
+    initialState.guestProfiles = [];
+    initialState.reservations = [];
+    initialState.guestFolioItems = [];
+    initialState.resortServices = [];
+    initialState.housekeepingTasks = [];
+    initialState.maintenanceIssues = [];
+    initialState.hotelPayments = [];
+    initialState.recipes = [];
+    initialState.suppliers = [];
+    initialState.purchaseOrders = [];
+    initialState.supplierPayables = [];
+    initialState.supplierPayments = [];
+    initialState.receivables = [];
+    initialState.accounts = createCleanChartOfAccounts(businessId);
+  }
+  saveTenantAppState(businessId, initialState);
+
+  // 4. Set as active business
+  setActiveBusinessId(businessId);
+
+  return { business: newBusiness, state: initialState };
+}
+
+/**
+ * Updates business details and settings
+ */
+export function updateBusiness(businessId: string, updates: Partial<BusinessTenant>): BusinessTenant | null {
+  const businesses = getRegisteredBusinesses();
+  const index = businesses.findIndex(b => b.businessId === businessId);
+  if (index === -1) return null;
+
+  const cleanedBusinessName = updates.businessName !== undefined ? updates.businessName.trim() : undefined;
+  if (cleanedBusinessName === '') {
+    throw new Error('Business Name cannot be empty.');
+  }
+
+  const updated: BusinessTenant = {
+    ...businesses[index],
+    ...updates,
+    ...(cleanedBusinessName ? { businessName: cleanedBusinessName } : {}),
+    updatedAt: new Date().toISOString().split('T')[0]
+  };
+
+  businesses[index] = updated;
+  saveRegisteredBusinesses(businesses);
+
+  // Also update BusinessSettings in that tenant's state if name or address changed
+  const state = loadTenantAppState(businessId);
+  if (state && state.settings) {
+    let settingsChanged = false;
+    if (cleanedBusinessName) {
+      state.settings.businessName = cleanedBusinessName;
+      settingsChanged = true;
+    }
+    if (updates.nepaliBusinessName) {
+      state.settings.nepaliBusinessName = updates.nepaliBusinessName;
+      settingsChanged = true;
+    }
+    if (updates.address) {
+      state.settings.address = updates.address;
+      settingsChanged = true;
+    }
+    if (updates.phone) {
+      state.settings.phone = updates.phone;
+      settingsChanged = true;
+    }
+    if (updates.panVatNumber) {
+      state.settings.panVatNumber = updates.panVatNumber;
+      settingsChanged = true;
+    }
+    if (settingsChanged) {
+      saveTenantAppState(businessId, state);
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Activates or suspends a business
+ */
+export function setBusinessStatus(businessId: string, status: BusinessStatus): BusinessTenant | null {
+  return updateBusiness(businessId, { status });
+}
+
+/**
+ * Creates custom starter template data tailored to business type
+ */
+export function createStarterStateForBusinessType(business: BusinessTenant): AppState {
+  const businessSettings: BusinessSettings = {
+    businessId: business.businessId,
+    businessName: business.businessName,
+    nepaliBusinessName: business.nepaliBusinessName || business.businessName,
+    tagline: business.tagline || 'Excellence in Service',
+    address: business.address,
+    phone: business.phone,
+    email: business.email,
+    panVatNumber: business.panVatNumber || '600000000',
+    currencySymbol: business.currencySymbol || 'Rs.',
+    enableVat: true,
+    vatRatePercent: 13,
+    enableServiceCharge: business.businessType.includes('RESORT') || business.businessType.includes('HOTEL'),
+    serviceChargePercent: 10,
+    receiptFooterMessage: 'Thank you for choosing ' + business.businessName + '! Visit again.',
+    enableSoundEffects: true,
+    defaultLanguage: 'en',
+    fonepayMerchantName: business.businessName,
+    sessionTimeoutMinutes: 120
+  };
+
+  if (business.businessId === 'biz-annapurna-coffee') {
+    // Cafe-specific template data
+    const cafeMenuItems: MenuItem[] = [
+      {
+        id: 'cm-1',
+        code: 'CF-101',
+        name: 'Himalayan Single-Origin Espresso',
+        nepaliName: 'सिङ्गल ओरिजिन एस्प्रेसो',
+        category: 'coffee',
+        price: 180,
+        costPrice: 40,
+        isAvailable: true,
+        preparationTimeMinutes: 3,
+        station: 'coffee_bar',
+        description: 'Locally grown organic Arabica beans from Nuwakot, medium dark roast.'
+      },
+      {
+        id: 'cm-2',
+        code: 'CF-102',
+        name: 'Flat White with Oat Milk',
+        nepaliName: 'फ्ल्याट ह्वाइट (ओट मिल्क)',
+        category: 'coffee',
+        price: 280,
+        costPrice: 85,
+        isAvailable: true,
+        preparationTimeMinutes: 4,
+        station: 'coffee_bar'
+      },
+      {
+        id: 'cm-3',
+        code: 'CF-103',
+        name: 'Kyoto Style Cold Brew',
+        nepaliName: 'क्योतो कोल्ड ब्रू',
+        category: 'cold_drinks',
+        price: 260,
+        costPrice: 60,
+        isAvailable: true,
+        preparationTimeMinutes: 2,
+        station: 'coffee_bar'
+      },
+      {
+        id: 'cm-4',
+        code: 'BK-101',
+        name: 'Butter Croissant',
+        nepaliName: 'बटर क्रोइसाँ',
+        category: 'bakery',
+        price: 220,
+        costPrice: 70,
+        isAvailable: true,
+        preparationTimeMinutes: 2,
+        station: 'bakery'
+      },
+      {
+        id: 'cm-5',
+        code: 'BK-102',
+        name: 'Warm Belgian Chocolate Brownie',
+        nepaliName: 'चकलेट ब्राउनी',
+        category: 'dessert',
+        price: 320,
+        costPrice: 90,
+        isAvailable: true,
+        preparationTimeMinutes: 3,
+        station: 'bakery'
+      },
+      {
+        id: 'cm-6',
+        code: 'SN-101',
+        name: 'Avocado & Sourdough Toast',
+        nepaliName: 'एभोकाडो टोस्ट',
+        category: 'snacks',
+        price: 450,
+        costPrice: 140,
+        isAvailable: true,
+        preparationTimeMinutes: 7,
+        station: 'main_kitchen'
+      }
+    ];
+
+    const cafeTables: TableRoom[] = [
+      { id: 'tb-c1', code: 'T-1', name: 'Window Bar 1', nepaliName: 'झ्याल छेउ १', type: 'table', capacity: 2, status: 'available' },
+      { id: 'tb-c2', code: 'T-2', name: 'Window Bar 2', nepaliName: 'झ्याल छेउ २', type: 'table', capacity: 2, status: 'available' },
+      { id: 'tb-c3', code: 'T-3', name: 'Garden Lounge 3', nepaliName: 'बगैंचा लाउन्ज ३', type: 'table', capacity: 4, status: 'available' },
+      { id: 'tb-c4', code: 'T-4', name: 'Garden Lounge 4', nepaliName: 'बगैंचा लाउन्ज ४', type: 'table', capacity: 4, status: 'available' },
+      { id: 'tb-c5', code: 'T-5', name: 'Community Table 5', nepaliName: 'ठूलो टेबल ५', type: 'table', capacity: 8, status: 'available' }
+    ];
+
+    const cafeInventory: InventoryItem[] = [
+      {
+        id: 'ci-1',
+        code: 'INV-CF-01',
+        name: 'Arabica Green & Roasted Beans',
+        nepaliName: 'कफीको गेडा',
+        category: 'coffee_tea',
+        currentStock: 24,
+        unit: 'kg',
+        minStockAlert: 8,
+        costPerUnit: 1200,
+        supplierName: 'Nuwakot Organic Estate',
+        lastUpdated: '2026-10-01'
+      },
+      {
+        id: 'ci-2',
+        code: 'INV-MK-02',
+        name: 'Full Cream Organic Dairy Milk',
+        nepaliName: 'दूध',
+        category: 'dairy',
+        currentStock: 45,
+        unit: 'ltr',
+        minStockAlert: 15,
+        costPerUnit: 110,
+        supplierName: 'Pokhara Dairy Cooperative',
+        lastUpdated: '2026-10-02'
+      }
+    ];
+
+    const cafeCustomers: Customer[] = [
+      {
+        id: 'cc-1',
+        name: 'Prakash Adhikari',
+        phone: '9846019283',
+        customerType: 'regular',
+        creditBalance: 0,
+        loyaltyPoints: 120,
+        totalSpend: 4500,
+        totalVisits: 14,
+        createdAt: '2026-09-18'
+      }
+    ];
+
+    return {
+      businessId: business.businessId,
+      menuItems: cafeMenuItems,
+      tablesRooms: cafeTables,
+      orders: [],
+      inventoryItems: cafeInventory,
+      inventoryLogs: [],
+      customers: cafeCustomers,
+      khataTransactions: [],
+      expenses: [],
+      dayClosings: [],
+      staffUsers: INITIAL_STAFF_USERS,
+      auditLogs: [
+        {
+          id: 'audit-annapurna-init',
+          businessId: business.businessId,
+          staffId: 'staff-admin-sys',
+          staffName: 'Bikash Gurung',
+          role: 'ADMIN',
+          action: 'BUSINESS_INITIALIZED',
+          details: 'Annapurna Specialty Coffee tenant workspace initialized with cafe menu and bar stations.',
+          timestamp: '2026-09-15 09:00:00',
+          severity: 'INFO'
+        }
+      ],
+      settings: businessSettings,
+      roomTypes: [],
+      resortRooms: [],
+      guestProfiles: [],
+      reservations: [],
+      guestFolioItems: [],
+      resortServices: [],
+      housekeepingTasks: [],
+      maintenanceIssues: [],
+      hotelPayments: []
+    };
+  }
+
+  if (business.businessId === 'biz-phewa-dining') {
+    // Restaurant-specific template data
+    const dineMenuItems: MenuItem[] = [
+      {
+        id: 'dm-1',
+        code: 'TH-201',
+        name: 'Authentic Thakali Set (Mutton)',
+        nepaliName: 'खाँटी थकाली खाना सेट (खसी)',
+        category: 'nepali_food',
+        price: 750,
+        costPrice: 280,
+        isAvailable: true,
+        preparationTimeMinutes: 12,
+        station: 'main_kitchen',
+        description: 'Jimbu tempered Mustang black lentils, Gundruk sadeko, Rayo saag, Timbur chutney, Mutton curry, and Basmati rice.'
+      },
+      {
+        id: 'dm-2',
+        code: 'FF-202',
+        name: 'Phewa Lake Fresh Whole Trout Grilled',
+        nepaliName: 'फेवा ट्राउट माछा ग्रिल्ड',
+        category: 'continental',
+        price: 1100,
+        costPrice: 450,
+        isAvailable: true,
+        preparationTimeMinutes: 18,
+        station: 'main_kitchen'
+      },
+      {
+        id: 'dm-3',
+        code: 'BR-203',
+        name: 'Hyderabadi Dum Mutton Biryani',
+        nepaliName: 'दम मटन बिर्यानी',
+        category: 'nepali_food',
+        price: 680,
+        costPrice: 260,
+        isAvailable: true,
+        preparationTimeMinutes: 15,
+        station: 'main_kitchen'
+      },
+      {
+        id: 'dm-4',
+        code: 'SN-204',
+        name: 'Crispy Butter Garlic Naan with Paneer Butter Masala',
+        nepaliName: 'बटर नान र पनिर मसला',
+        category: 'fast_food',
+        price: 490,
+        costPrice: 170,
+        isAvailable: true,
+        preparationTimeMinutes: 10,
+        station: 'main_kitchen'
+      }
+    ];
+
+    const dineTables: TableRoom[] = [
+      { id: 'dt-1', code: 'D-1', name: 'Lakeside Deck 1', nepaliName: 'लेकसाइड डेक १', type: 'table', capacity: 4, status: 'available' },
+      { id: 'dt-2', code: 'D-2', name: 'Lakeside Deck 2', nepaliName: 'लेकसाइड डेक २', type: 'table', capacity: 4, status: 'available' },
+      { id: 'dt-3', code: 'D-3', name: 'Private VIP Cabin', nepaliName: 'भि-आइ-पी क्याबिन', type: 'cottage', capacity: 8, status: 'available' },
+      { id: 'dt-4', code: 'D-4', name: 'Main Dining Hall 1', nepaliName: 'डाइनिङ हल १', type: 'table', capacity: 6, status: 'available' },
+      { id: 'dt-5', code: 'D-5', name: 'Main Dining Hall 2', nepaliName: 'डाइनिङ हल २', type: 'table', capacity: 6, status: 'available' }
+    ];
+
+    return {
+      businessId: business.businessId,
+      menuItems: dineMenuItems,
+      tablesRooms: dineTables,
+      orders: [],
+      inventoryItems: INITIAL_INVENTORY.slice(0, 5),
+      inventoryLogs: [],
+      customers: INITIAL_CUSTOMERS.slice(0, 3),
+      khataTransactions: [],
+      expenses: [],
+      dayClosings: [],
+      staffUsers: INITIAL_STAFF_USERS,
+      auditLogs: [
+        {
+          id: 'audit-phewa-init',
+          businessId: business.businessId,
+          staffId: 'staff-admin-sys',
+          staffName: 'Pooja Shrestha',
+          role: 'ADMIN',
+          action: 'BUSINESS_INITIALIZED',
+          details: 'Phewa Lakeside Fine Dine Restaurant initialized with lakeside deck tables and gourmet menu.',
+          timestamp: '2026-09-20 10:00:00',
+          severity: 'INFO'
+        }
+      ],
+      settings: businessSettings,
+      roomTypes: [],
+      resortRooms: [],
+      guestProfiles: [],
+      reservations: [],
+      guestFolioItems: [],
+      resortServices: [],
+      housekeepingTasks: [],
+      maintenanceIssues: [],
+      hotelPayments: []
+    };
+  }
+
+  // Default / Resort / Combined Starter Template:
+  // Includes ONLY structural starter catalog (menu, tables, raw inventory SKUs, room types, rooms, service catalog)
+  // Zero fake financial balances, zero fake customers/Khata dues, zero fake reservations/folios/hotelPayments!
+  const hasResort = business.enabledModules.includes('resort');
+
+  return {
+    businessId: business.businessId,
+    menuItems: INITIAL_MENU_ITEMS,
+    tablesRooms: INITIAL_TABLES_ROOMS,
+    orders: [],
+    inventoryItems: INITIAL_INVENTORY,
+    inventoryLogs: [],
+    customers: [],
+    khataTransactions: [],
+    expenses: [],
+    dayClosings: [],
+    staffUsers: INITIAL_STAFF_USERS,
+    auditLogs: [
+      {
+        id: 'audit-' + business.businessId + '-init',
+        businessId: business.businessId,
+        staffId: business.ownerId,
+        staffName: business.ownerName,
+        role: 'OWNER',
+        action: 'BUSINESS_INITIALIZED',
+        details: `Workspace initialized for ${business.businessName} with ${business.businessType} profile and isolated database store.`,
+        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        severity: 'INFO'
+      }
+    ],
+    settings: businessSettings,
+    accounts: createCleanChartOfAccounts(business.businessId),
+    roomTypes: hasResort ? INITIAL_ROOM_TYPES : [],
+    resortRooms: hasResort ? INITIAL_RESORT_ROOMS : [],
+    guestProfiles: [],
+    reservations: [],
+    guestFolioItems: [],
+    resortServices: hasResort ? INITIAL_RESORT_SERVICES : [],
+    housekeepingTasks: [],
+    maintenanceIssues: [],
+    hotelPayments: []
+  };
+}
+
+export interface CloudTenantMetaSummary {
+  businessId: string;
+  businessName: string;
+  nepaliBusinessName?: string;
+  tagline?: string;
+  businessType?: BusinessType;
+  ownerUid?: string;
+  ownerEmail?: string;
+  status?: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+  enabledModules?: AppModule[];
+  currencySymbol?: string;
+}
+
+/**
+ * Merges cloud-registered client businesses discovered by the App Creator
+ * into the local tenant registry without duplicating IDs or wiping local details.
+ */
+export function upsertSyncedCloudBusinesses(cloudList: CloudTenantMetaSummary[]): BusinessTenant[] {
+  const existing = getRegisteredBusinesses();
+  const byId = new Map<string, BusinessTenant>(existing.map((b) => [b.businessId, b]));
+  const today = new Date().toISOString().split('T')[0];
+
+  for (const meta of cloudList) {
+    if (!meta?.businessId) continue;
+    const prev = byId.get(meta.businessId);
+    const nextStatus = meta.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE';
+    const fallbackType: BusinessType = meta.businessType || 'CAFE_RESTAURANT';
+    const nextModules =
+      Array.isArray(meta.enabledModules) && meta.enabledModules.length > 0
+        ? meta.enabledModules
+        : prev?.enabledModules || DEFAULT_MODULES_BY_TYPE[fallbackType] || ALL_APP_MODULES;
+
+    if (prev) {
+      byId.set(meta.businessId, {
+        ...prev,
+        businessName: meta.businessName || prev.businessName,
+        nepaliBusinessName: meta.nepaliBusinessName ?? prev.nepaliBusinessName,
+        tagline: meta.tagline ?? prev.tagline,
+        businessType: meta.businessType || prev.businessType,
+        status: nextStatus,
+        enabledModules: nextModules,
+        currencySymbol: meta.currencySymbol || prev.currencySymbol,
+        email: prev.email || meta.ownerEmail || prev.email,
+        updatedAt: today
+      });
+    } else {
+      byId.set(meta.businessId, {
+        businessId: meta.businessId,
+        businessName: meta.businessName || meta.businessId,
+        nepaliBusinessName: meta.nepaliBusinessName,
+        tagline: meta.tagline || 'Cloud-Synced Client Workspace',
+        businessType: fallbackType,
+        ownerId: meta.ownerUid || 'cloud-owner',
+        ownerName: meta.ownerEmail || 'Client Owner',
+        phone: '',
+        email: meta.ownerEmail || '',
+        address: 'Cloud Tenant',
+        panVatNumber: '',
+        status: nextStatus,
+        enabledModules: nextModules,
+        currencySymbol: meta.currencySymbol || 'Rs.',
+        environment: 'production',
+        templateType: 'clean_slate',
+        createdAt: today,
+        updatedAt: today
+      });
+    }
+  }
+
+  const merged = Array.from(byId.values());
+  saveRegisteredBusinesses(merged);
+  return merged;
+}
+

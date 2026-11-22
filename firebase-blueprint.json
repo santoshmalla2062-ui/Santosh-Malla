@@ -1,0 +1,768 @@
+{
+  "entities": {
+    "AdminRegistry": {
+      "title": "Master Owner Admin Registry",
+      "description": "Bootstrapped Master Owner directory verified against Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["OWNER", "SUPER_ADMIN"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "email", "role", "createdAt"]
+    },
+    "BusinessWorkspace": {
+      "title": "Business Workspace",
+      "description": "Isolated cafe/restaurant/resort business tenant and owner lock policies.",
+      "type": "object",
+      "properties": {
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "nepaliBusinessName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "businessType": {
+          "type": "string",
+          "enum": ["CAFE", "RESTAURANT", "RESORT", "HOTEL", "CAFE_RESTAURANT", "RESTAURANT_RESORT", "CAFE_RESTAURANT_RESORT", "OTHER"]
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "SUSPENDED", "INACTIVE"]
+        },
+        "enabledModules": {
+          "type": "array",
+          "description": "Bounded list of enabled POS modules (max 12)."
+        },
+        "currencySymbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10
+        },
+        "enableVat": {
+          "type": "boolean"
+        },
+        "vatRatePercent": {
+          "type": "number"
+        },
+        "enableServiceCharge": {
+          "type": "boolean"
+        },
+        "serviceChargePercent": {
+          "type": "number"
+        },
+        "fonepayMerchantName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "ownerControlLocked": {
+          "type": "boolean",
+          "description": "When true, non-owner staff devices cannot switch roles without owner PIN."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "businessId",
+        "businessName",
+        "ownerUid",
+        "ownerEmail",
+        "status",
+        "enabledModules",
+        "currencySymbol",
+        "ownerControlLocked",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StaffInvite": {
+      "title": "Owner-Issued Staff Device Invite",
+      "description": "Controlled invitation created strictly by business owner to grant mobile/device role access to an employee Gmail.",
+      "type": "object",
+      "properties": {
+        "inviteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "staffName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN", "MANAGER", "CASHIER", "WAITER", "KITCHEN", "RECEPTIONIST", "HOUSEKEEPING", "ACCOUNTANT", "INVENTORY_STAFF", "STAFF"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACTIVE", "REVOKED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["inviteId", "businessId", "ownerUid", "email", "staffName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "BusinessMember": {
+      "title": "Authorized Business Device Member",
+      "description": "Verified Firebase user granted explicit RBAC role access inside a business workspace.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["OWNER", "ADMIN", "MANAGER", "CASHIER", "WAITER", "KITCHEN", "RECEPTIONIST", "HOUSEKEEPING", "ACCOUNTANT", "INVENTORY_STAFF", "STAFF"]
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "inviteId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "businessId", "ownerUid", "email", "name", "role", "isActive", "createdAt", "updatedAt"]
+    },
+    "SyncChannelState": {
+      "title": "Live Multi-Device Sync Channel",
+      "description": "Role-tiered native Firestore workspace sync channels (orders_live, menu_tables, inventory_ledger, finance_records, resort_ops, admin_controls).",
+      "type": "object",
+      "properties": {
+        "channelId": {
+          "type": "string",
+          "enum": ["orders_live", "menu_tables", "inventory_ledger", "finance_records", "resort_ops", "admin_controls"]
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "data": {
+          "type": "object",
+          "description": "Byte-budgeted (< 550 KB) native Firestore Map containing bounded live state tails while high-volume history lives in sharded subcollections."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["channelId", "businessId", "ownerUid", "updatedByUid", "revision", "data", "createdAt", "updatedAt"]
+    },
+    "FiscalOrderRecord": {
+      "title": "Immutable Fiscal Order & Split Invoice",
+      "description": "Normalized individual POS/Dining order & settled invoice ledger with terminal status locking.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "invoiceNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kotNo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "tableRoomId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "tableRoomName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "orderType": {
+          "type": "string",
+          "enum": ["dine_in", "takeaway", "delivery", "room_service", "room_stay"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "completed", "cancelled"]
+        },
+        "kotStatus": {
+          "type": "string",
+          "enum": ["pending", "new", "accepted", "preparing", "ready", "served", "cancelled", "sent_to_kitchen", "expired"]
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["cash", "esewa", "khalti", "card", "bank", "qr", "fonepay_qr", "credit_khata", "charge_to_room", "split"]
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["paid", "pending", "credit", "partial"]
+        },
+        "subtotal": {
+          "type": "number"
+        },
+        "discountAmount": {
+          "type": "number"
+        },
+        "serviceChargeAmount": {
+          "type": "number"
+        },
+        "vatAmount": {
+          "type": "number"
+        },
+        "grandTotal": {
+          "type": "number"
+        },
+        "paidAmount": {
+          "type": "number"
+        },
+        "dueAmount": {
+          "type": "number"
+        },
+        "items": {
+          "type": "array",
+          "description": "Bounded order line items (max 100 items per ticket)."
+        },
+        "fiscalYear": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "bsDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "buyerPan": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "taxInvoicePrinted": {
+          "type": "boolean"
+        },
+        "creditNoteNo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "cbmsSynced": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "businessId",
+        "ownerUid",
+        "createdByUid",
+        "invoiceNo",
+        "orderType",
+        "status",
+        "paymentMethod",
+        "paymentStatus",
+        "grandTotal",
+        "items",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SequenceCounter": {
+      "title": "Atomic Transaction Sequence Counter",
+      "description": "Monotonic server-side transaction counter for Invoice, KOT, and Credit Note numbering across concurrent POS terminals.",
+      "type": "object",
+      "properties": {
+        "counterId": {
+          "type": "string",
+          "enum": ["invoice", "kot", "credit_note", "receipt"]
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "prefix": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "fiscalYear": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "currentSeq": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["counterId", "businessId", "ownerUid", "updatedByUid", "currentSeq", "createdAt", "updatedAt"]
+    },
+    "CreditNoteRecord": {
+      "title": "Immutable IRD Credit Note / Sales Return",
+      "description": "Sequential fiscal credit note issued when a settled Tax Invoice is voided or returned.",
+      "type": "object",
+      "properties": {
+        "creditNoteId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "creditNoteNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "originalOrderId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128
+        },
+        "originalInvoiceNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "fiscalYear": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "bsDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "adDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "subtotal": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "serviceChargeAmount": { "type": "number" },
+        "vatAmount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 32 },
+        "buyerName": { "type": "string", "maxLength": 120 },
+        "buyerPan": { "type": "string", "maxLength": 32 },
+        "issuedByName": { "type": "string", "maxLength": 120 },
+        "items": {
+          "type": "array",
+          "description": "Returned order line items."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "creditNoteId",
+        "businessId",
+        "ownerUid",
+        "createdByUid",
+        "creditNoteNo",
+        "originalOrderId",
+        "originalInvoiceNo",
+        "grandTotal",
+        "createdAt"
+      ]
+    },
+    "JournalEntryRecord": {
+      "title": "Sharded Double-Entry General Ledger Voucher",
+      "description": "Individual balanced double-entry journal entry stored in a dedicated subcollection to prevent 1 MB document limits in finance_records.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "entryNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "bsDate": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "referenceType": {
+          "type": "string",
+          "enum": ["POS_SALE", "CREDIT_NOTE", "EXPENSE", "KHATA_COLLECTION", "HOTEL_PAYMENT", "OPENING_BALANCE", "ADJUSTMENT"]
+        },
+        "referenceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "referenceNo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "lines": {
+          "type": "array",
+          "description": "Balanced Debit/Credit journal lines (max 30 lines per voucher)."
+        },
+        "totalDebit": { "type": "number" },
+        "totalCredit": { "type": "number" },
+        "createdByName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "businessId",
+        "ownerUid",
+        "createdByUid",
+        "entryNumber",
+        "referenceType",
+        "lines",
+        "totalDebit",
+        "totalCredit",
+        "createdAt"
+      ]
+    },
+    "AuditLogRecord": {
+      "title": "Sharded Security & POS Audit Log Entry",
+      "description": "Immutable per-event security and billing audit trail stored in a dedicated subcollection to keep admin_controls lightweight.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "staffId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "staffName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "targetRecordId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["INFO", "WARNING", "CRITICAL"]
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "businessId",
+        "ownerUid",
+        "createdByUid",
+        "staffId",
+        "action",
+        "severity",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Bootstrapped Master Owner document keyed by Firebase Auth UID."
+    },
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/BusinessWorkspace" },
+      "description": "Business configuration and owner-lock flags."
+    },
+    "/businesses/{businessId}/invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Owner-issued Gmail invitations mapping specific employees to strict roles."
+    },
+    "/businesses/{businessId}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/BusinessMember" },
+      "description": "Verified members allowed on mobile/tablet/desktop terminals."
+    },
+    "/businesses/{businessId}/syncChannels/{channelId}": {
+      "schema": { "$ref": "#/entities/SyncChannelState" },
+      "description": "Role-tiered live real-time state channels syncing Mobile Waiter, Kitchen KDS, Inventory, and Billing Desk under strict 550 KB byte budgets."
+    },
+    "/businesses/{businessId}/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/FiscalOrderRecord" },
+      "description": "Sharded per-order subcollection preventing 1 MB document limits across thousands of POS orders."
+    },
+    "/businesses/{businessId}/counters/{counterId}": {
+      "schema": { "$ref": "#/entities/SequenceCounter" },
+      "description": "Atomic transaction counters for concurrency-safe multi-device invoice, KOT, and credit note numbering."
+    },
+    "/businesses/{businessId}/creditNotes/{creditNoteId}": {
+      "schema": { "$ref": "#/entities/CreditNoteRecord" },
+      "description": "Sharded immutable IRD Annex-5 Credit Notes / Sales Returns linked to settled tax invoices."
+    },
+    "/businesses/{businessId}/journalEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/JournalEntryRecord" },
+      "description": "Sharded double-entry General Ledger vouchers preventing 1 MB limits in finance_records."
+    },
+    "/businesses/{businessId}/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogRecord" },
+      "description": "Sharded security & POS audit log events preventing 1 MB limits in admin_controls."
+    }
+  }
+}

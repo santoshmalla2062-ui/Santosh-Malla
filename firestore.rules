@@ -1,0 +1,798 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Global Safety Net (Default-Deny Catch-All)
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Hardened Primitive Helpers
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isMasterOwnerEmail() {
+      return isVerifiedUser() && request.auth.token.email == 'samjhamnamalla22444@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isMasterOwnerEmail() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function businessExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    function businessData(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)).data;
+    }
+
+    function isBusinessOwner(businessId) {
+      return isVerifiedUser() &&
+        businessExists(businessId) &&
+        businessData(businessId).ownerUid == request.auth.uid;
+    }
+
+    function isOwnerOrMaster(businessId) {
+      return isMasterOwnerEmail() || isBusinessOwner(businessId);
+    }
+
+    function memberExists(businessId) {
+      return exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+    }
+
+    function memberData(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data;
+    }
+
+    function isActiveMember(businessId) {
+      return isVerifiedUser() &&
+        memberExists(businessId) &&
+        memberData(businessId).isActive == true;
+    }
+
+    function hasMemberRole(businessId, allowedRoles) {
+      return isActiveMember(businessId) && (memberData(businessId).role in allowedRoles);
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (No existing() or diff() inside helpers)
+    // -------------------------------------------------------------------------
+    function isValidAdminDoc(data, docUid) {
+      return data.keys().hasAll(['userId', 'email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'email', 'role', 'createdAt']) &&
+        isValidId(data.userId) &&
+        data.userId == docUid &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 128 &&
+        data.role in ['OWNER', 'SUPER_ADMIN'] &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidBusiness(data, pathBizId) {
+      return data.keys().hasAll([
+          'businessId', 'businessName', 'ownerUid', 'ownerEmail',
+          'status', 'enabledModules', 'currencySymbol',
+          'ownerControlLocked', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'businessId', 'businessName', 'nepaliBusinessName', 'tagline',
+          'businessType', 'ownerUid', 'ownerEmail', 'status',
+          'enabledModules', 'currencySymbol', 'enableVat', 'vatRatePercent',
+          'enableServiceCharge', 'serviceChargePercent', 'fonepayMerchantName',
+          'ownerControlLocked', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160 &&
+        (!('nepaliBusinessName' in data) || (data.nepaliBusinessName is string && data.nepaliBusinessName.size() <= 160)) &&
+        (!('tagline' in data) || (data.tagline is string && data.tagline.size() <= 240)) &&
+        (!('businessType' in data) || (data.businessType in ['CAFE', 'RESTAURANT', 'RESORT', 'HOTEL', 'CAFE_RESTAURANT', 'RESTAURANT_RESORT', 'CAFE_RESTAURANT_RESORT', 'OTHER'])) &&
+        isValidId(data.ownerUid) &&
+        data.ownerEmail is string && data.ownerEmail.size() >= 5 && data.ownerEmail.size() <= 128 &&
+        data.status in ['ACTIVE', 'SUSPENDED', 'INACTIVE'] &&
+        data.enabledModules is list && data.enabledModules.size() <= 12 &&
+        (data.enabledModules.size() == 0 || data.enabledModules[0] is string) &&
+        data.currencySymbol is string && data.currencySymbol.size() >= 1 && data.currencySymbol.size() <= 10 &&
+        (!('enableVat' in data) || data.enableVat is bool) &&
+        (!('vatRatePercent' in data) || (data.vatRatePercent is number && data.vatRatePercent >= 0 && data.vatRatePercent <= 50)) &&
+        (!('enableServiceCharge' in data) || data.enableServiceCharge is bool) &&
+        (!('serviceChargePercent' in data) || (data.serviceChargePercent is number && data.serviceChargePercent >= 0 && data.serviceChargePercent <= 50)) &&
+        (!('fonepayMerchantName' in data) || (data.fonepayMerchantName is string && data.fonepayMerchantName.size() <= 120)) &&
+        data.ownerControlLocked is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidInvite(data, pathBizId, pathInviteId) {
+      return data.keys().hasAll([
+          'inviteId', 'businessId', 'ownerUid', 'email',
+          'staffName', 'role', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'inviteId', 'businessId', 'ownerUid', 'email',
+          'staffName', 'role', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.inviteId) &&
+        data.inviteId == pathInviteId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 128 &&
+        data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 120 &&
+        data.role in ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'] &&
+        data.status in ['PENDING', 'ACTIVE', 'REVOKED'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMember(data, pathBizId, pathMemberUid) {
+      return data.keys().hasAll([
+          'uid', 'businessId', 'ownerUid', 'email',
+          'name', 'role', 'isActive', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'businessId', 'ownerUid', 'email',
+          'name', 'role', 'isActive', 'inviteId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.uid == pathMemberUid &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.role in ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'] &&
+        data.isActive is bool &&
+        (!('inviteId' in data) || isValidId(data.inviteId)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSyncChannel(data, pathBizId, pathChannelId) {
+      return data.keys().hasAll([
+          'channelId', 'businessId', 'ownerUid', 'updatedByUid',
+          'revision', 'data', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'channelId', 'businessId', 'ownerUid', 'updatedByUid',
+          'revision', 'data', 'createdAt', 'updatedAt'
+        ]) &&
+        data.channelId in ['orders_live', 'menu_tables', 'inventory_ledger', 'finance_records', 'resort_ops', 'admin_controls'] &&
+        data.channelId == pathChannelId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.updatedByUid) &&
+        data.revision is number && data.revision >= 0 &&
+        data.data is map &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOrderDoc(data, pathBizId, pathOrderId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'invoiceNo', 'orderType', 'status', 'paymentMethod',
+          'paymentStatus', 'grandTotal', 'items', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'invoiceNo', 'kotNo', 'tableRoomId', 'tableRoomName',
+          'orderType', 'status', 'kotStatus', 'paymentMethod',
+          'paymentStatus', 'subtotal', 'discountPercent', 'discountAmount',
+          'serviceChargeAmount', 'vatAmount', 'grandTotal', 'paidAmount',
+          'dueAmount', 'paymentDetails', 'cashTendered', 'changeReturned',
+          'paymentReference', 'guestCount', 'parentSplitOrderId', 'cashierName',
+          'waiterName', 'customerId', 'customerName', 'customerPhone',
+          'specialInstructions', 'waivedServiceCharge', 'waivedVat',
+          'items', 'settledAt', 'fiscalYear', 'bsDate', 'buyerPan',
+          'taxInvoicePrinted', 'creditNoteNo', 'cbmsSynced', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id.size() >= 2 &&
+        data.id == pathOrderId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.createdByUid) &&
+        data.invoiceNo is string && data.invoiceNo.size() >= 1 && data.invoiceNo.size() <= 64 &&
+        (!('kotNo' in data) || (data.kotNo is string && data.kotNo.size() <= 64)) &&
+        (!('tableRoomId' in data) || (data.tableRoomId is string && data.tableRoomId.size() <= 64)) &&
+        (!('tableRoomName' in data) || (data.tableRoomName is string && data.tableRoomName.size() <= 120)) &&
+        data.orderType in ['dine_in', 'takeaway', 'delivery', 'room_service', 'room_stay'] &&
+        data.status in ['active', 'completed', 'cancelled'] &&
+        (!('kotStatus' in data) || (data.kotStatus in ['pending', 'new', 'accepted', 'preparing', 'ready', 'served', 'cancelled', 'sent_to_kitchen', 'expired'])) &&
+        data.paymentMethod in ['cash', 'esewa', 'khalti', 'card', 'bank', 'qr', 'fonepay_qr', 'credit_khata', 'charge_to_room', 'split'] &&
+        data.paymentStatus in ['paid', 'pending', 'credit', 'partial'] &&
+        (!('subtotal' in data) || (data.subtotal is number && data.subtotal >= 0)) &&
+        (!('discountPercent' in data) || (data.discountPercent is number && data.discountPercent >= 0 && data.discountPercent <= 100)) &&
+        (!('discountAmount' in data) || (data.discountAmount is number && data.discountAmount >= 0)) &&
+        (!('serviceChargeAmount' in data) || (data.serviceChargeAmount is number && data.serviceChargeAmount >= 0)) &&
+        (!('vatAmount' in data) || (data.vatAmount is number && data.vatAmount >= 0)) &&
+        data.grandTotal is number && data.grandTotal >= 0 &&
+        (!('paidAmount' in data) || (data.paidAmount is number && data.paidAmount >= 0)) &&
+        (!('dueAmount' in data) || (data.dueAmount is number && data.dueAmount >= 0)) &&
+        (!('paymentDetails' in data) || data.paymentDetails is map) &&
+        (!('cashTendered' in data) || (data.cashTendered is number && data.cashTendered >= 0)) &&
+        (!('changeReturned' in data) || (data.changeReturned is number && data.changeReturned >= 0)) &&
+        (!('paymentReference' in data) || (data.paymentReference is string && data.paymentReference.size() <= 120)) &&
+        (!('guestCount' in data) || (data.guestCount is number && data.guestCount >= 0 && data.guestCount <= 200)) &&
+        (!('parentSplitOrderId' in data) || isValidId(data.parentSplitOrderId)) &&
+        (!('cashierName' in data) || (data.cashierName is string && data.cashierName.size() <= 120)) &&
+        (!('waiterName' in data) || (data.waiterName is string && data.waiterName.size() <= 120)) &&
+        (!('customerId' in data) || (data.customerId is string && data.customerId.size() <= 128)) &&
+        (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 120)) &&
+        (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() <= 40)) &&
+        (!('specialInstructions' in data) || (data.specialInstructions is string && data.specialInstructions.size() <= 300)) &&
+        (!('waivedServiceCharge' in data) || data.waivedServiceCharge is bool) &&
+        (!('waivedVat' in data) || data.waivedVat is bool) &&
+        (!('fiscalYear' in data) || (data.fiscalYear is string && data.fiscalYear.size() <= 20)) &&
+        (!('bsDate' in data) || (data.bsDate is string && data.bsDate.size() <= 20)) &&
+        (!('buyerPan' in data) || (data.buyerPan is string && data.buyerPan.size() <= 32)) &&
+        (!('taxInvoicePrinted' in data) || data.taxInvoicePrinted is bool) &&
+        (!('creditNoteNo' in data) || (data.creditNoteNo is string && data.creditNoteNo.size() <= 64)) &&
+        (!('cbmsSynced' in data) || data.cbmsSynced is bool) &&
+        data.items is list && data.items.size() <= 100 &&
+        (data.items.size() == 0 || data.items[0] is map) &&
+        (!('settledAt' in data) || (data.settledAt is string && data.settledAt.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCounterDoc(data, pathBizId, pathCounterId) {
+      return data.keys().hasAll([
+          'counterId', 'businessId', 'ownerUid', 'updatedByUid', 'currentSeq', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'counterId', 'businessId', 'ownerUid', 'updatedByUid',
+          'prefix', 'fiscalYear', 'currentSeq', 'createdAt', 'updatedAt'
+        ]) &&
+        data.counterId in ['invoice', 'kot', 'credit_note', 'receipt'] &&
+        data.counterId == pathCounterId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.updatedByUid) &&
+        (!('prefix' in data) || (data.prefix is string && data.prefix.size() <= 20)) &&
+        (!('fiscalYear' in data) || (data.fiscalYear is string && data.fiscalYear.size() <= 20)) &&
+        data.currentSeq is number && data.currentSeq >= 1 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCreditNoteDoc(data, pathBizId, pathCnId) {
+      return data.keys().hasAll([
+          'creditNoteId', 'businessId', 'ownerUid', 'createdByUid',
+          'creditNoteNo', 'originalOrderId', 'originalInvoiceNo', 'grandTotal', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'creditNoteId', 'businessId', 'ownerUid', 'createdByUid',
+          'creditNoteNo', 'originalOrderId', 'originalInvoiceNo',
+          'fiscalYear', 'bsDate', 'adDate', 'reason',
+          'subtotal', 'discountAmount', 'serviceChargeAmount', 'vatAmount', 'grandTotal',
+          'paymentMethod', 'buyerName', 'buyerPan', 'issuedByName', 'items', 'createdAt'
+        ]) &&
+        isValidId(data.creditNoteId) &&
+        data.creditNoteId.size() >= 2 &&
+        data.creditNoteId == pathCnId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.createdByUid) &&
+        data.creditNoteNo is string && data.creditNoteNo.size() >= 1 && data.creditNoteNo.size() <= 64 &&
+        data.originalOrderId is string && data.originalOrderId.size() >= 2 && data.originalOrderId.size() <= 128 &&
+        data.originalInvoiceNo is string && data.originalInvoiceNo.size() >= 1 && data.originalInvoiceNo.size() <= 64 &&
+        (!('fiscalYear' in data) || (data.fiscalYear is string && data.fiscalYear.size() <= 20)) &&
+        (!('bsDate' in data) || (data.bsDate is string && data.bsDate.size() <= 20)) &&
+        (!('adDate' in data) || (data.adDate is string && data.adDate.size() <= 20)) &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 240)) &&
+        (!('subtotal' in data) || (data.subtotal is number && data.subtotal >= 0)) &&
+        (!('discountAmount' in data) || (data.discountAmount is number && data.discountAmount >= 0)) &&
+        (!('serviceChargeAmount' in data) || (data.serviceChargeAmount is number && data.serviceChargeAmount >= 0)) &&
+        (!('vatAmount' in data) || (data.vatAmount is number && data.vatAmount >= 0)) &&
+        data.grandTotal is number && data.grandTotal >= 0 &&
+        (!('paymentMethod' in data) || (data.paymentMethod is string && data.paymentMethod.size() <= 32)) &&
+        (!('buyerName' in data) || (data.buyerName is string && data.buyerName.size() <= 120)) &&
+        (!('buyerPan' in data) || (data.buyerPan is string && data.buyerPan.size() <= 32)) &&
+        (!('issuedByName' in data) || (data.issuedByName is string && data.issuedByName.size() <= 120)) &&
+        (!('items' in data) || (data.items is list && data.items.size() <= 100)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidJournalEntryDoc(data, pathBizId, pathEntryId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'entryNumber', 'referenceType', 'lines', 'totalDebit', 'totalCredit', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'entryNumber', 'date', 'bsDate', 'referenceType', 'referenceId',
+          'referenceNo', 'description', 'lines', 'totalDebit', 'totalCredit',
+          'createdByName', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id.size() >= 2 &&
+        data.id == pathEntryId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.createdByUid) &&
+        data.entryNumber is string && data.entryNumber.size() >= 1 && data.entryNumber.size() <= 40 &&
+        (!('date' in data) || (data.date is string && data.date.size() <= 32)) &&
+        (!('bsDate' in data) || (data.bsDate is string && data.bsDate.size() <= 20)) &&
+        data.referenceType in ['POS_SALE', 'CREDIT_NOTE', 'EXPENSE', 'KHATA_COLLECTION', 'HOTEL_PAYMENT', 'OPENING_BALANCE', 'ADJUSTMENT'] &&
+        (!('referenceId' in data) || (data.referenceId is string && data.referenceId.size() <= 128)) &&
+        (!('referenceNo' in data) || (data.referenceNo is string && data.referenceNo.size() <= 64)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 240)) &&
+        data.lines is list && data.lines.size() >= 2 && data.lines.size() <= 30 &&
+        data.lines[0] is map &&
+        data.totalDebit is number && data.totalDebit > 0 &&
+        data.totalCredit is number && data.totalCredit > 0 &&
+        (!('createdByName' in data) || (data.createdByName is string && data.createdByName.size() <= 120)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAuditLogDoc(data, pathBizId, pathLogId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'staffId', 'action', 'severity', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'createdByUid',
+          'staffId', 'staffName', 'role', 'action', 'targetRecordId',
+          'details', 'severity', 'timestamp', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id.size() >= 2 &&
+        data.id == pathLogId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.createdByUid) &&
+        data.staffId is string && data.staffId.size() >= 1 && data.staffId.size() <= 128 &&
+        (!('staffName' in data) || (data.staffName is string && data.staffName.size() <= 120)) &&
+        (!('role' in data) || (data.role is string && data.role.size() <= 32)) &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+        (!('targetRecordId' in data) || (data.targetRecordId is string && data.targetRecordId.size() <= 128)) &&
+        (!('details' in data) || (data.details is string && data.details.size() <= 400)) &&
+        data.severity in ['INFO', 'WARNING', 'CRITICAL'] &&
+        (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 32)) &&
+        data.createdAt is timestamp;
+    }
+
+    function canReadSyncChannel(businessId, channelId) {
+      return isOwnerOrMaster(businessId) || (
+        channelId == 'orders_live' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'STAFF'])
+      ) || (
+        channelId == 'menu_tables' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'STAFF'])
+      ) || (
+        channelId == 'inventory_ledger' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'KITCHEN', 'INVENTORY_STAFF', 'ACCOUNTANT'])
+      ) || (
+        channelId == 'finance_records' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT', 'RECEPTIONIST'])
+      ) || (
+        channelId == 'resort_ops' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'RECEPTIONIST', 'HOUSEKEEPING', 'CASHIER'])
+      );
+    }
+
+    function canWriteSyncChannel(businessId, channelId) {
+      return isOwnerOrMaster(businessId) || (
+        channelId == 'orders_live' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST'])
+      ) || (
+        channelId == 'menu_tables' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'RECEPTIONIST', 'HOUSEKEEPING'])
+      ) || (
+        channelId == 'inventory_ledger' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'KITCHEN', 'INVENTORY_STAFF'])
+      ) || (
+        channelId == 'finance_records' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT', 'RECEPTIONIST'])
+      ) || (
+        channelId == 'resort_ops' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'RECEPTIONIST', 'HOUSEKEEPING'])
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // /admins/{userId} - Bootstrapped Master Owner Registry
+    // -------------------------------------------------------------------------
+    match /admins/{userId} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(userId) && (
+        request.auth.uid == userId || isMasterOwnerEmail()
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && isMasterOwnerEmail();
+      allow create: if isSignedIn() && isVerifiedUser() && isValidId(userId) &&
+        isMasterOwnerEmail() &&
+        isValidAdminDoc(incoming(), userId) &&
+        incoming().userId == request.auth.uid &&
+        incoming().email == request.auth.token.email &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isMasterOwnerEmail();
+    }
+
+    // -------------------------------------------------------------------------
+    // /businesses/{businessId} - Multi-Tenant Enterprise Workspaces
+    // -------------------------------------------------------------------------
+    match /businesses/{businessId} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && (
+        isMasterOwnerEmail() ||
+        (resource != null && existing().ownerUid == request.auth.uid) ||
+        isActiveMember(businessId)
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && (
+        isMasterOwnerEmail() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+      allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) &&
+        isValidBusiness(incoming(), businessId) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().ownerEmail == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) &&
+        isValidBusiness(incoming(), businessId) &&
+        incoming().businessId == existing().businessId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().ownerEmail == existing().ownerEmail &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'businessName', 'nepaliBusinessName', 'tagline', 'businessType',
+          'status', 'enabledModules', 'currencySymbol', 'enableVat',
+          'vatRatePercent', 'enableServiceCharge', 'serviceChargePercent',
+          'fonepayMerchantName', 'ownerControlLocked', 'updatedAt'
+        ]) && (
+          isMasterOwnerEmail() ||
+          existing().ownerUid == request.auth.uid
+        );
+      allow delete: if isMasterOwnerEmail() || (isVerifiedUser() && resource != null && existing().ownerUid == request.auth.uid);
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/invites/{inviteId} - Owner-Issued Invites
+      // -----------------------------------------------------------------------
+      match /invites/{inviteId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) && (
+          isMasterOwnerEmail() ||
+          isBusinessOwner(businessId) ||
+          (resource != null && existing().email == request.auth.token.email)
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          resource.data.email == request.auth.token.email
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
+          isValidInvite(incoming(), businessId, inviteId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          isOwnerOrMaster(businessId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
+          isValidInvite(incoming(), businessId, inviteId) &&
+          incoming().inviteId == existing().inviteId &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().email == existing().email &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            (
+              existing().email == request.auth.token.email &&
+              existing().status == 'PENDING' &&
+              incoming().status == 'ACTIVE' &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            )
+          );
+        allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
+          isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/members/{memberUid} - Verified Access List
+      // -----------------------------------------------------------------------
+      match /members/{memberUid} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) && (
+          isOwnerOrMaster(businessId) ||
+          request.auth.uid == memberUid
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
+          isValidMember(incoming(), businessId, memberUid) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            (
+              request.auth.uid == memberUid &&
+              incoming().uid == request.auth.uid &&
+              incoming().email == request.auth.token.email &&
+              incoming().isActive == true &&
+              incoming().role != 'OWNER' &&
+              ('inviteId' in incoming()) &&
+              exists(/databases/$(database)/documents/businesses/$(businessId)/invites/$(incoming().inviteId)) &&
+              get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(incoming().inviteId)).data.email == request.auth.token.email &&
+              get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(incoming().inviteId)).data.role == incoming().role &&
+              get(/databases/$(database)/documents/businesses/$(businessId)/invites/$(incoming().inviteId)).data.status == 'PENDING' &&
+              getAfter(/databases/$(database)/documents/businesses/$(businessId)/invites/$(incoming().inviteId)).data.status == 'ACTIVE'
+            )
+          );
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
+          isValidMember(incoming(), businessId, memberUid) &&
+          incoming().uid == existing().uid &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().email == existing().email &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'isActive', 'name', 'updatedAt']) &&
+          isOwnerOrMaster(businessId) &&
+          (incoming().role != 'OWNER' || isMasterOwnerEmail() || request.auth.uid == existing().ownerUid);
+        allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
+          isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/syncChannels/{channelId} - Role-Tiered Sync
+      // -----------------------------------------------------------------------
+      match /syncChannels/{channelId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(channelId) &&
+          canReadSyncChannel(businessId, channelId);
+        allow list: if false;
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(channelId) &&
+          isValidSyncChannel(incoming(), businessId, channelId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          canWriteSyncChannel(businessId, channelId);
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(channelId) &&
+          isValidSyncChannel(incoming(), businessId, channelId) &&
+          incoming().channelId == existing().channelId &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['data', 'revision', 'updatedByUid', 'updatedAt']) &&
+          canWriteSyncChannel(businessId, channelId);
+        allow delete: if isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/orders/{orderId} - Fiscal Order Ledger
+      // -----------------------------------------------------------------------
+      match /orders/{orderId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(orderId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'ACCOUNTANT', 'RECEPTIONIST'])
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'ACCOUNTANT', 'RECEPTIONIST'])
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(orderId) &&
+          isValidOrderDoc(incoming(), businessId, orderId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().createdByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'RECEPTIONIST'])
+          );
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(orderId) &&
+          isValidOrderDoc(incoming(), businessId, orderId) &&
+          incoming().id == existing().id &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdByUid == existing().createdByUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            (
+              existing().status == 'active' && (
+                // Kitchen KOT status transition only
+                (
+                  hasMemberRole(businessId, ['KITCHEN']) &&
+                  incoming().diff(existing()).affectedKeys().hasOnly(['kotStatus', 'updatedAt'])
+                ) ||
+                // Waiter taking/updating active orders and completing customer billing (no discount/tax tampering or voiding)
+                (
+                  hasMemberRole(businessId, ['WAITER']) &&
+                  incoming().status in ['active', 'completed'] &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'items', 'subtotal', 'discountAmount', 'serviceChargeAmount',
+                    'vatAmount', 'grandTotal', 'paidAmount', 'dueAmount',
+                    'paymentMethod', 'paymentStatus', 'paymentDetails',
+                    'cashTendered', 'changeReturned', 'paymentReference', 'cashierName',
+                    'customerId', 'customerName', 'customerPhone', 'kotNo', 'kotStatus',
+                    'specialInstructions', 'guestCount', 'tableRoomId', 'tableRoomName',
+                    'status', 'settledAt', 'fiscalYear', 'bsDate', 'buyerPan', 'updatedAt'
+                  ])
+                ) ||
+                // Cashier / Receptionist billing settlement & table assignment (cannot void to cancelled or waive taxes)
+                (
+                  hasMemberRole(businessId, ['CASHIER', 'RECEPTIONIST']) &&
+                  incoming().status in ['active', 'completed'] &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'items', 'subtotal', 'discountPercent', 'discountAmount',
+                    'serviceChargeAmount', 'vatAmount', 'grandTotal', 'paidAmount',
+                    'dueAmount', 'paymentMethod', 'paymentStatus', 'paymentDetails',
+                    'cashTendered', 'changeReturned', 'paymentReference', 'cashierName',
+                    'customerId', 'customerName', 'customerPhone', 'kotNo', 'kotStatus',
+                    'specialInstructions', 'guestCount', 'tableRoomId', 'tableRoomName',
+                    'status', 'settledAt', 'fiscalYear', 'bsDate', 'buyerPan', 'taxInvoicePrinted', 'updatedAt'
+                  ])
+                ) ||
+                // Admin / Manager supervisor settlement, pricing overrides, and voiding
+                (
+                  hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+                  incoming().diff(existing()).affectedKeys().hasOnly([
+                    'items', 'subtotal', 'discountPercent', 'discountAmount',
+                    'serviceChargeAmount', 'vatAmount', 'grandTotal', 'paidAmount',
+                    'dueAmount', 'paymentMethod', 'paymentStatus', 'paymentDetails',
+                    'cashTendered', 'changeReturned', 'paymentReference', 'cashierName',
+                    'customerId', 'customerName', 'customerPhone', 'kotNo', 'kotStatus',
+                    'specialInstructions', 'guestCount', 'tableRoomId', 'tableRoomName',
+                    'status', 'settledAt', 'waivedServiceCharge', 'waivedVat',
+                    'fiscalYear', 'bsDate', 'buyerPan', 'taxInvoicePrinted', 'creditNoteNo', 'cbmsSynced', 'updatedAt'
+                  ])
+                )
+              )
+            )
+          );
+        allow delete: if isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/counters/{counterId} - Atomic Counters
+      // -----------------------------------------------------------------------
+      match /counters/{counterId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(counterId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'RECEPTIONIST'])
+        );
+        allow list: if false;
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(counterId) &&
+          isValidCounterDoc(incoming(), businessId, counterId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'RECEPTIONIST'])
+          );
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(counterId) &&
+          isValidCounterDoc(incoming(), businessId, counterId) &&
+          incoming().counterId == existing().counterId &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().currentSeq > existing().currentSeq &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['currentSeq', 'updatedByUid', 'updatedAt']) && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'RECEPTIONIST'])
+          );
+        allow delete: if isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/creditNotes/{creditNoteId} - Immutable Credit Notes
+      // -----------------------------------------------------------------------
+      match /creditNotes/{creditNoteId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(creditNoteId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'])
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'])
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(creditNoteId) &&
+          isValidCreditNoteDoc(incoming(), businessId, creditNoteId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().createdByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
+          );
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/journalEntries/{entryId} - Sharded Double-Entry GL
+      // -----------------------------------------------------------------------
+      match /journalEntries/{entryId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(entryId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT', 'RECEPTIONIST'])
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT', 'RECEPTIONIST'])
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(entryId) &&
+          isValidJournalEntryDoc(incoming(), businessId, entryId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().createdByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT', 'RECEPTIONIST', 'WAITER'])
+          );
+        allow update: if false;
+        allow delete: if isOwnerOrMaster(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/auditLogs/{logId} - Sharded Audit Logs
+      // -----------------------------------------------------------------------
+      match /auditLogs/{logId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(logId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'ACCOUNTANT'])
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'ACCOUNTANT'])
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(logId) &&
+          isValidAuditLogDoc(incoming(), businessId, logId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().createdByUid == request.auth.uid &&
+          incoming().createdAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            isActiveMember(businessId)
+          );
+        allow update: if false;
+        allow delete: if isMasterOwnerEmail();
+      }
+    }
+  }
+}
