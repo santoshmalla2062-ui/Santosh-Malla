@@ -91,13 +91,31 @@ test('Privilege Escalation Defense: Terminal locks role switching and hides Owne
     true
   );
 
-  // Waiters & Kitchen never get free role switching even when lock is off
+  // Waiters & Kitchen never get free role switching even when lock is off or Master Owner Google session exists
   assert.strictEqual(
     canFreeSwitchRoles({
       currentRole: 'WAITER',
       ownerControlLocked: false,
       isMasterOwnerGoogle: false,
       isBusinessOwnerGoogle: false
+    }),
+    false
+  );
+  assert.strictEqual(
+    canFreeSwitchRoles({
+      currentRole: 'WAITER',
+      ownerControlLocked: true,
+      isMasterOwnerGoogle: true,
+      isBusinessOwnerGoogle: false
+    }),
+    false
+  );
+  assert.strictEqual(
+    canFreeSwitchRoles({
+      currentRole: 'CASHIER',
+      ownerControlLocked: true,
+      isMasterOwnerGoogle: true,
+      isBusinessOwnerGoogle: true
     }),
     false
   );

@@ -122,14 +122,14 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
   if (!isOpen) return null;
 
   // Strict App Creator / Super Admin Access Authorization Check
-  if (currentRole !== 'SUPER_ADMIN' && !isAppCreator) {
+  if (currentRole !== 'SUPER_ADMIN') {
     return (
       <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border border-rose-200">
           <ShieldAlert className="h-12 w-12 text-rose-600 mx-auto mb-3" />
           <h3 className="text-lg font-bold text-slate-900 mb-1">App Creator Access Required</h3>
           <p className="text-xs text-slate-600 mb-4">
-            Global platform governance is locked exclusively to the verified App Creator ({MASTER_OWNER_EMAIL}). Individual business owners can manage their branch from Business Admin.
+            Global platform governance is locked exclusively to an authenticated App Creator session. Individual business owners can manage their branch from Business Admin.
           </p>
           <button
             onClick={onClose}

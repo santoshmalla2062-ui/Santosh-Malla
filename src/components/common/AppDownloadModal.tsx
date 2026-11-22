@@ -22,6 +22,7 @@ import {
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Language } from '../../utils/translations';
 import {
+  DEFAULT_ANDROID_APK_URL,
   buildAppDownloadUrl,
   resolveDefaultPublicAppUrl,
   sanitizeAndroidApkUrl
@@ -67,7 +68,9 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
     typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('apk') || undefined
       : undefined;
-  const effectiveApkUrl = sanitizeAndroidApkUrl(apkParam || androidApkUrl || '');
+  const effectiveApkUrl = sanitizeAndroidApkUrl(
+    apkParam || androidApkUrl || DEFAULT_ANDROID_APK_URL
+  );
   const shareableInstallUrl = buildAppDownloadUrl(
     resolveDefaultPublicAppUrl(currentOrigin),
     bizParam,
@@ -110,7 +113,7 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3.5">
               <img
-                src="/pwa-192x192.png"
+                src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
                 alt={businessName}
                 className="h-14 w-14 rounded-2xl border border-white/15 shadow-lg bg-slate-800 shrink-0"
               />

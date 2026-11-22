@@ -274,7 +274,7 @@ export const BusinessSwitcherModal: React.FC<BusinessSwitcherModalProps> = ({
             <span>Multi-enterprise database isolation enforced at workspace level</span>
           </div>
 
-          {(currentRole === 'SUPER_ADMIN' || isAppCreator) && onOpenSuperAdmin && (
+          {currentRole === 'SUPER_ADMIN' && onOpenSuperAdmin && (
             <button
               onClick={() => {
                 onClose();

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SHARED_APP_URL,
   DEV_APP_URL,
+  DEFAULT_ANDROID_APK_URL,
   sanitizePublicBaseUrl,
   resolveDefaultPublicAppUrl,
   buildAppDirectUrl,
@@ -90,5 +91,7 @@ test('Distribution: Sanitizes Android .APK URLs, converts Google Drive links, an
   );
   assert.ok(withApk.startsWith('https://pos.myrestaurant.com/?download=1&biz=biz-1&apk='));
   assert.ok(decodeURIComponent(withApk).includes('https://drive.google.com/uc?export=download&id=1AbCdEfGhIjKlMnOpQrStUv'));
+  assert.equal(sanitizeAndroidApkUrl(DEFAULT_ANDROID_APK_URL), DEFAULT_ANDROID_APK_URL);
+  assert.ok(DEFAULT_ANDROID_APK_URL.includes('1CLnOe7tdTQYTcgsbV9RrPKSDrgKqz_Ws'));
 });
 

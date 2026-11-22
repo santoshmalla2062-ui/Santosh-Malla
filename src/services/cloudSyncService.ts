@@ -150,18 +150,21 @@ export function canFreeSwitchRoles(params: {
   isMasterOwnerGoogle?: boolean;
   isBusinessOwnerGoogle?: boolean;
 }): boolean {
+  const isPrivilegedSessionRole =
+    params.currentRole === 'OWNER' ||
+    params.currentRole === 'ADMIN' ||
+    params.currentRole === 'SUPER_ADMIN';
+
+  // Once switched to a staff terminal role (Waiter, Cashier, Kitchen, Manager, etc.),
+  // lock down the role switcher so nobody holding the terminal can escalate back without re-authenticating.
+  if (!isPrivilegedSessionRole) {
+    return false;
+  }
   if (params.isMasterOwnerGoogle || params.isBusinessOwnerGoogle) {
     return true;
   }
   const locked = params.ownerControlLocked !== false; // strict default: true
-  if (locked) {
-    return false;
-  }
-  return (
-    params.currentRole === 'OWNER' ||
-    params.currentRole === 'ADMIN' ||
-    params.currentRole === 'SUPER_ADMIN'
-  );
+  return !locked;
 }
 
 /**
@@ -952,7 +955,7 @@ export async function resolveCloudMemberAccess(
     return {
       status: 'UNAUTHORIZED',
       email,
-      reason: `This Gmail (${email}) is not authorized. Ask the Owner (${MASTER_OWNER_EMAIL}) to invite your email from Business Admin.`
+      reason: `This Gmail (${email}) is not authorized for this workspace. Ask your Owner or Admin to invite your Gmail or issue an Invitation Code.`
     };
   }
 

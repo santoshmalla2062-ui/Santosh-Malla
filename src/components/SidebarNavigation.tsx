@@ -292,9 +292,25 @@ export const SidebarNavigation: React.FC<SidebarNavigationProps> = ({
         {/* Brand Lockup (Foodmandu Warm Accent Style) */}
         <div className="p-3.5 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/50">
           <button
-            onClick={onOpenBusinessSwitcher}
+            type="button"
+            onClick={
+              currentRole === 'SUPER_ADMIN' ||
+              currentRole === 'OWNER' ||
+              currentRole === 'ADMIN' ||
+              currentRole === 'MANAGER'
+                ? onOpenBusinessSwitcher
+                : undefined
+            }
+            disabled={
+              !(
+                currentRole === 'SUPER_ADMIN' ||
+                currentRole === 'OWNER' ||
+                currentRole === 'ADMIN' ||
+                currentRole === 'MANAGER'
+              )
+            }
             title={activeBusiness?.businessName || 'Himalayan Breeze'}
-            className="flex items-center gap-2.5 text-left w-full overflow-hidden group"
+            className="flex items-center gap-2.5 text-left w-full overflow-hidden group disabled:cursor-default"
           >
             {/* Brand Logo Tile or Initials Monogram */}
             {resolvedLogo && !logoLoadError ? (
@@ -430,7 +446,7 @@ export const SidebarNavigation: React.FC<SidebarNavigationProps> = ({
                 )}
               </button>
             )}
-            {(currentRole === 'SUPER_ADMIN' || isAppCreator) && onOpenSuperAdmin && (
+            {currentRole === 'SUPER_ADMIN' && onOpenSuperAdmin && (
               <button
                 onClick={onOpenSuperAdmin}
                 title="App Creator & SaaS Control Hub"

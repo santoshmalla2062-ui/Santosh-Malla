@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Session, StaffRole, StaffUser } from '../../types';
 import { hashPinWithSalt, isKnownWeakPin, saveSession, validateProductionPin } from '../../services/security';
-import { getVisibleDemoPinRoles, MASTER_OWNER_EMAIL } from '../../services/cloudSyncService';
+import { getVisibleDemoPinRoles } from '../../services/cloudSyncService';
 import { Language } from '../../utils/translations';
 import { PWAInstallButton } from '../common/PWAInstallButton';
 
@@ -565,8 +565,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
               <p className="text-[10px] text-slate-500 leading-relaxed">
                 {lang === 'ne'
-                  ? `App Creator वा Business Owner ले तपाईंको Gmail लाई जुन भूमिका (Role) दिनुभएको छ, सोही भूमिकामा मात्र स्वचालित लग-इन हुनेछ।`
-                  : `Signing in with Google logs in the App Creator (${MASTER_OWNER_EMAIL}) with global SUPER_ADMIN sync, or locks client terminals to their assigned role.`}
+                  ? `Owner वा Admin ले तपाईंको Gmail लाई जुन भूमिका (Role) दिनुभएको छ, सोही भूमिकामा मात्र सुरक्षित लग-इन हुनेछ।`
+                  : `Sign in with Google for verified Owner / App Creator access, or your Admin-assigned staff role.`}
               </p>
 
               {isEmbeddedWebView && (

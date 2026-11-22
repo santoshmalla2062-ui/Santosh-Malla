@@ -15,6 +15,7 @@ import {
 import { Language } from '../../utils/translations';
 import {
   SHARED_APP_URL,
+  DEFAULT_ANDROID_APK_URL,
   buildAppDirectUrl,
   buildAppDownloadUrl,
   isLocalOrDevPreviewUrl,
@@ -51,7 +52,9 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
   const [baseUrlInput, setBaseUrlInput] = useState<string>(() =>
     resolveDefaultPublicAppUrl(currentOrigin)
   );
-  const [apkUrlInput, setApkUrlInput] = useState<string>(androidApkUrl);
+  const [apkUrlInput, setApkUrlInput] = useState<string>(
+    androidApkUrl || DEFAULT_ANDROID_APK_URL
+  );
   const [savedApkFeedback, setSavedApkFeedback] = useState<boolean>(false);
   const [targetMode, setTargetMode] = useState<QRTargetMode>('download');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -60,7 +63,7 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   useEffect(() => {
-    setApkUrlInput(androidApkUrl || '');
+    setApkUrlInput(androidApkUrl || DEFAULT_ANDROID_APK_URL);
   }, [androidApkUrl]);
 
   const cleanedBaseUrl = useMemo(() => sanitizePublicBaseUrl(baseUrlInput), [baseUrlInput]);

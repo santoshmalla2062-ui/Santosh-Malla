@@ -538,7 +538,51 @@ export default function App() {
     setCloudAuthError(null);
     explicitGoogleSignInRef.current = true;
     try {
-      await signInWithGooglePopup();
+      const signedInUser = await signInWithGooglePopup();
+      // If Firebase cached the same UID (e.g. re-authenticating back to Owner from a locked Waiter terminal),
+      // onAuthStateChanged may not re-fire, so restore verified Owner/Creator/Authorized session explicitly.
+      if (signedInUser && firebaseUser?.uid === signedInUser.uid) {
+        if (isMasterOwnerUser(signedInUser)) {
+          const creatorStaff: StaffUser = {
+            id: signedInUser.uid,
+            username: signedInUser.email || 'creator',
+            name: signedInUser.displayName || 'App Creator',
+            nepaliName: 'एप क्रिएटर (App Creator)',
+            role: 'SUPER_ADMIN',
+            pinHash: '',
+            salt: 'google-oauth',
+            isActive: true,
+            email: signedInUser.email || undefined,
+            businessId: activeBusiness.businessId,
+            createdAt: new Date().toISOString().split('T')[0]
+          };
+          const restored = saveSession(creatorStaff, 120, activeBusiness.businessId);
+          setCurrentSession(restored);
+          setShowLoginModal(false);
+          setActiveTab('dashboard');
+          explicitGoogleSignInRef.current = false;
+        } else if (cloudAccess?.status === 'AUTHORIZED') {
+          const staffObj: StaffUser = {
+            id: signedInUser.uid,
+            username: cloudAccess.email,
+            name: cloudAccess.name,
+            nepaliName: cloudAccess.name,
+            role: cloudAccess.role,
+            pinHash: '',
+            salt: 'google-oauth',
+            isActive: true,
+            email: cloudAccess.email,
+            businessId: activeBusiness.businessId,
+            createdAt: new Date().toISOString().split('T')[0]
+          };
+          const restored = saveSession(staffObj, 120, activeBusiness.businessId);
+          setCurrentSession(restored);
+          setShowLoginModal(false);
+          const home = getHomeConfigForRole(cloudAccess.role, activeBusiness.enabledModules);
+          setActiveTab(home.defaultTab);
+          explicitGoogleSignInRef.current = false;
+        }
+      }
     } catch (err: any) {
       explicitGoogleSignInRef.current = false;
       const msg = err?.message || 'Google Sign-In failed or was cancelled.';
@@ -547,7 +591,7 @@ export default function App() {
     } finally {
       setIsGoogleAuthLoading(false);
     }
-  }, []);
+  }, [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess]);
 
   const handleGoogleSignOut = useCallback(async () => {
     if (cloudUnsubscribeRef.current) {
@@ -1351,7 +1395,7 @@ export default function App() {
   // Refresh all cloud client businesses for the App Creator Hub
   const handleRefreshCreatorCloudBusinesses = async () => {
     if (!isMasterOwnerGoogle || cloudSyncStatus !== 'connected') {
-      throw new Error(`Sign in with App Creator Google (${MASTER_OWNER_EMAIL}) first to sync all cloud businesses.`);
+      throw new Error('Sign in with the verified App Creator Google account first to sync all cloud businesses.');
     }
     const cloudList = await listAllCloudBusinessesForCreator();
     const merged = upsertSyncedCloudBusinesses(cloudList);
@@ -1437,7 +1481,7 @@ export default function App() {
     const userRole = currentSession?.role;
 
     if (activeBusiness.status === 'SUSPENDED' && !isMasterOwnerGoogle) {
-      setSecurityAlert(`Workspace Suspended: Billing is temporarily paused for "${activeBusiness.businessName}". Contact App Creator (${MASTER_OWNER_EMAIL}) to reactivate.`);
+      setSecurityAlert(`Workspace Suspended: Billing is temporarily paused for "${activeBusiness.businessName}". Contact your App Creator or SaaS Administrator to reactivate.`);
       playChime('alert');
       return false;
     }
@@ -1839,7 +1883,7 @@ export default function App() {
   ): boolean => {
     const userRole = currentSession?.role;
     if (activeBusiness.status === 'SUSPENDED' && !isMasterOwnerGoogle) {
-      setSecurityAlert(`Workspace Suspended: Billing is temporarily paused for "${activeBusiness.businessName}". Contact App Creator (${MASTER_OWNER_EMAIL}) to reactivate.`);
+      setSecurityAlert(`Workspace Suspended: Billing is temporarily paused for "${activeBusiness.businessName}". Contact your App Creator or SaaS Administrator to reactivate.`);
       playChime('alert');
       return false;
     }
@@ -3491,7 +3535,12 @@ export default function App() {
         soundEnabled={appState.settings.enableSoundEffects ?? true}
         onBackupClick={() => exportBackupJSON(appState)}
         onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
-        onOpenBusinessSwitcher={() => setShowBusinessSwitcherModal(true)}
+        onOpenBusinessSwitcher={() => {
+          const role = currentSession?.role;
+          if (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'MANAGER') {
+            setShowBusinessSwitcherModal(true);
+          }
+        }}
         onOpenMobileQR={() => setShowMobileQRModal(true)}
         isAppCreator={isMasterOwnerGoogle}
       />
@@ -3504,7 +3553,12 @@ export default function App() {
           lang={language}
           currentSession={currentSession}
           activeBusiness={activeBusiness}
-          onOpenBusinessSwitcher={() => setShowBusinessSwitcherModal(true)}
+          onOpenBusinessSwitcher={() => {
+            const role = currentSession?.role;
+            if (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'MANAGER') {
+              setShowBusinessSwitcherModal(true);
+            }
+          }}
           onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
           onLanguageChange={setLanguage}
           onBackupClick={() => exportBackupJSON(appState)}
@@ -3557,7 +3611,7 @@ export default function App() {
                 <span>
                   {isMasterOwnerGoogle
                     ? `App Creator Notice: Workspace "${activeBusiness.businessName}" is currently SUSPENDED for client billing (${activeBusiness.suspensionReason || 'Platform Hold'}).`
-                    : `Workspace Suspended: ${activeBusiness.suspensionReason || 'Your SaaS subscription is paused.'} New orders & checkout are blocked. Contact App Creator: ${MASTER_OWNER_EMAIL}`}
+                    : `Workspace Suspended: ${activeBusiness.suspensionReason || 'Your SaaS subscription is paused.'} New orders & checkout are blocked. Contact your App Creator or SaaS Administrator.`}
                 </span>
               </div>
               {isMasterOwnerGoogle && (

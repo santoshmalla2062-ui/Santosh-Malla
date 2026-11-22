@@ -147,11 +147,34 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Foodmandu-Style Restaurant Selector Dropdown Button */}
+            {/* Foodmandu-Style Restaurant Selector Dropdown Button (Locked to Admin/Owner/Manager) */}
             <button
-              onClick={onOpenBusinessSwitcher}
-              title="Click to switch restaurant / business branch"
-              className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-300/80 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-2xs group"
+              type="button"
+              onClick={
+                currentSession?.role === 'SUPER_ADMIN' ||
+                currentSession?.role === 'OWNER' ||
+                currentSession?.role === 'ADMIN' ||
+                currentSession?.role === 'MANAGER'
+                  ? onOpenBusinessSwitcher
+                  : undefined
+              }
+              disabled={
+                !(
+                  currentSession?.role === 'SUPER_ADMIN' ||
+                  currentSession?.role === 'OWNER' ||
+                  currentSession?.role === 'ADMIN' ||
+                  currentSession?.role === 'MANAGER'
+                )
+              }
+              title={
+                currentSession?.role === 'SUPER_ADMIN' ||
+                currentSession?.role === 'OWNER' ||
+                currentSession?.role === 'ADMIN' ||
+                currentSession?.role === 'MANAGER'
+                  ? 'Click to switch restaurant / business branch'
+                  : settings.businessName || 'Restaurant Workspace'
+              }
+              className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-300/80 bg-white hover:bg-slate-50 disabled:hover:bg-white disabled:cursor-default text-slate-800 transition-all shadow-2xs group"
             >
               {resolvedLogo && !logoLoadError ? (
                 <img
@@ -226,7 +249,14 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenLogin();
                 }
               }}
-              title={cloudUserEmail ? `Cloud Connected: ${cloudUserEmail}` : 'Connect Google account for Mobile ↔ Laptop Cloud Sync'}
+              title={
+                cloudUserEmail &&
+                (currentSession?.role === 'SUPER_ADMIN' ||
+                  currentSession?.role === 'OWNER' ||
+                  currentSession?.role === 'ADMIN')
+                  ? 'Cloud Sync Connected'
+                  : 'Connect Google account for Mobile ↔ Laptop Cloud Sync'
+              }
               className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
                 cloudSyncStatus === 'connected'
                   ? isMasterOwnerGoogle
@@ -290,7 +320,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="relative flex items-center gap-1.5 bg-slate-50 border border-slate-200 p-1 rounded-lg">
                 <div className="text-left hidden sm:block px-1">
                   <span className="text-[10px] text-slate-500 block leading-none">
-                    {isMasterOwnerGoogle ? 'App Creator:' : 'Signed in:'}
+                    {currentSession.role === 'SUPER_ADMIN' ? 'App Creator:' : 'Signed in:'}
                   </span>
                   <span className="text-xs font-bold text-slate-900 block leading-tight truncate max-w-[100px]">{currentSession.name}</span>
                 </div>
@@ -410,7 +440,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
 
-                {(currentSession.role === 'SUPER_ADMIN' || isMasterOwnerGoogle) && onOpenSuperAdmin && (
+                {currentSession.role === 'SUPER_ADMIN' && onOpenSuperAdmin && (
                   <button
                     onClick={onOpenSuperAdmin}
                     title="App Creator & SaaS Control Hub"

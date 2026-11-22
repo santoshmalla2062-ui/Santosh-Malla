@@ -4,6 +4,9 @@ export const SHARED_APP_URL =
 export const DEV_APP_URL =
   'https://ais-dev-ggorgk5h6owhq22zwzdgxh-666001801875.asia-southeast1.run.app';
 
+export const DEFAULT_ANDROID_APK_URL =
+  'https://drive.google.com/uc?export=download&id=1CLnOe7tdTQYTcgsbV9RrPKSDrgKqz_Ws';
+
 export function sanitizePublicBaseUrl(rawUrl: string): string {
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return '';
