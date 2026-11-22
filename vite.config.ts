@@ -5,15 +5,21 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  const rawBase = (process.env.VITE_BASE_PATH || '/').trim();
+  const normalizedBase =
+    rawBase === '/' || !rawBase ? '/' : `/${rawBase.replace(/^\/+|\/+$/g, '')}/`;
+
   return {
+    base: normalizedBase,
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
+        base: normalizedBase,
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png'],
         manifest: {
-          id: '/',
+          id: normalizedBase,
           name: 'Himalayan Breeze POS & Resort',
           short_name: 'HB Breeze',
           description: 'Billing POS, kitchen KOT, inventory tracking, resort rooms, and multi-device cloud sync.',
@@ -25,23 +31,23 @@ export default defineConfig(() => {
           orientation: 'any',
           categories: ['business', 'food', 'productivity'],
           prefer_related_applications: false,
-          start_url: '/',
-          scope: '/',
+          start_url: normalizedBase,
+          scope: normalizedBase,
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: `${normalizedBase}pwa-192x192.png`,
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: `${normalizedBase}pwa-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: `${normalizedBase}pwa-maskable-512x512.png`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -84,7 +90,7 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
           type: 'module',
         },
       }),

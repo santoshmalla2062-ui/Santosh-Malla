@@ -36,12 +36,18 @@ export function isLocalOrDevPreviewUrl(rawUrl?: string | null): boolean {
   );
 }
 
-export function resolveDefaultPublicAppUrl(currentOrigin?: string): string {
+export function resolveDefaultPublicAppUrl(currentOrigin?: string, basePath?: string): string {
   const cleanOrigin = sanitizePublicBaseUrl(currentOrigin || '');
   if (!cleanOrigin || isLocalOrDevPreviewUrl(cleanOrigin)) {
     return SHARED_APP_URL;
   }
-  return cleanOrigin;
+  const envBase =
+    typeof import.meta !== 'undefined'
+      ? (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL
+      : undefined;
+  const resolvedBase = (basePath ?? envBase ?? '/').trim();
+  const cleanSubpath = resolvedBase.replace(/^\/+|\/+$/g, '');
+  return cleanSubpath ? `${cleanOrigin}/${cleanSubpath}` : cleanOrigin;
 }
 
 export function buildAppDirectUrl(baseUrl: string, businessId?: string): string {

@@ -23,6 +23,11 @@ test('Distribution: Prefers live custom origin when hosted publicly and falls ba
   assert.equal(resolveDefaultPublicAppUrl('http://localhost:3000'), SHARED_APP_URL);
   assert.equal(resolveDefaultPublicAppUrl(DEV_APP_URL), SHARED_APP_URL);
   assert.equal(resolveDefaultPublicAppUrl('https://pos.myrestaurant.com'), 'https://pos.myrestaurant.com');
+  assert.equal(
+    resolveDefaultPublicAppUrl('https://owner.github.io', '/himalayan-breeze/'),
+    'https://owner.github.io/himalayan-breeze'
+  );
+  assert.equal(resolveDefaultPublicAppUrl('https://owner.github.io', '/'), 'https://owner.github.io');
 });
 
 test('Distribution: Builds clean direct & ?download=1 URLs and XSS-safe embeddable HTML snippet', () => {
