@@ -19,7 +19,9 @@ import {
   ArrowRightLeft,
   Trash2,
   AlertTriangle,
-  Users
+  Users,
+  Edit3,
+  BedDouble
 } from 'lucide-react';
 import {
   BusinessSettings,
@@ -61,6 +63,8 @@ interface RoomGridViewProps {
   onUpdateRoomStatus: (roomId: string, status: ResortRoomStatus) => void;
   onSaveRoom: (room: ResortRoom) => void;
   onDeleteRoom?: (roomId: string) => { ok: boolean; error?: string } | void;
+  onOpenRoomTypes?: () => void;
+  onOpenEditStay?: (reservation: Reservation) => void;
 }
 
 export const RoomGridView: React.FC<RoomGridViewProps> = ({
@@ -81,7 +85,9 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
   onOpenMaintenanceModal,
   onUpdateRoomStatus,
   onSaveRoom,
-  onDeleteRoom
+  onDeleteRoom,
+  onOpenRoomTypes,
+  onOpenEditStay
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -93,9 +99,12 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
   const [showRoomModal, setShowRoomModal] = useState(false);
   const [editingRoom, setEditingRoom] = useState<ResortRoom | null>(null);
   const [roomNumber, setRoomNumber] = useState('');
+  const [roomName, setRoomName] = useState('');
   const [roomTypeId, setRoomTypeId] = useState(roomTypes[0]?.id || '');
   const [floor, setFloor] = useState('Floor 1');
   const [pricePerNight, setPricePerNight] = useState<number>(4500);
+  const [hourlyRate, setHourlyRate] = useState<number>(0);
+  const [extraGuestPrice, setExtraGuestPrice] = useState<number>(1000);
   const [capacity, setCapacity] = useState<number>(3);
   const [amenitiesStr, setAmenitiesStr] = useState('WiFi, Mountain View, AC, Hot Shower');
   const [roomStatusInput, setRoomStatusInput] = useState<ResortRoomStatus>('AVAILABLE');
@@ -210,10 +219,13 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
   const openAddRoom = () => {
     setEditingRoom(null);
     setRoomNumber('');
+    setRoomName('');
     setRoomTypeId(roomTypes[0]?.id || '');
     setFloor(floors[0] || 'Floor 1');
     setPricePerNight(roomTypes[0]?.basePrice || 4500);
-    setCapacity(3);
+    setHourlyRate(0);
+    setExtraGuestPrice(roomTypes[0]?.extraGuestPrice || 1000);
+    setCapacity(roomTypes[0]?.totalCapacity || 3);
     setAmenitiesStr('WiFi, Mountain View, AC, Hot Shower');
     setRoomStatusInput('AVAILABLE');
     setRoomNotesInput('');
@@ -225,9 +237,12 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
   const openEditRoom = (room: ResortRoom) => {
     setEditingRoom(room);
     setRoomNumber(room.roomNumber);
+    setRoomName(room.roomName || '');
     setRoomTypeId(room.roomTypeId);
     setFloor(room.floor);
     setPricePerNight(room.pricePerNight);
+    setHourlyRate(room.hourlyRate || 0);
+    setExtraGuestPrice(room.extraGuestPrice || 1000);
     setCapacity(room.capacity);
     setAmenitiesStr(room.amenities.join(', '));
     setRoomStatusInput(room.status);
@@ -247,11 +262,14 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
     const roomData: ResortRoom = {
       id: editingRoom ? editingRoom.id : 'r-' + roomNumber.trim().toLowerCase().replace(/\s+/g, '-'),
       roomNumber: roomNumber.trim(),
+      roomName: roomName.trim() || undefined,
       roomTypeId,
-      roomTypeName: rType?.name || 'Standard Room',
-      floor,
+      roomTypeName: rType?.name || editingRoom?.roomTypeName || 'Standard Room',
+      floor: floor.trim() || 'Floor 1',
       capacity,
       pricePerNight,
+      hourlyRate: hourlyRate > 0 ? hourlyRate : undefined,
+      extraGuestPrice: extraGuestPrice > 0 ? extraGuestPrice : undefined,
       amenities,
       description: roomNotesInput.trim() || undefined,
       status: editingRoom
@@ -366,6 +384,17 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
               <Plus className="h-3.5 w-3.5" />
               {lang === 'ne' ? 'नयाँ बुकिङ' : 'New Booking'}
             </button>
+
+            {onOpenRoomTypes && (
+              <button
+                type="button"
+                onClick={onOpenRoomTypes}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+              >
+                <BedDouble className="h-3.5 w-3.5 text-emerald-800" />
+                {lang === 'ne' ? 'कोठा प्रकार र दर' : 'Room Types & Rates'}
+              </button>
+            )}
 
             <button
               type="button"
@@ -497,6 +526,9 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                       <span className="text-xl font-black text-slate-900 tracking-tight font-mono-num">
                         Room {room.roomNumber}
                       </span>
+                      {room.roomName && (
+                        <p className="text-[11px] font-bold text-emerald-900 truncate">{room.roomName}</p>
+                      )}
                       <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
                         <span>{room.floor}</span>
                         <span>·</span>
@@ -661,6 +693,16 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                       >
                         <Receipt className="h-3 w-3" /> Folio
                       </button>
+                      {onOpenEditStay && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenEditStay(activeRes)}
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                          title="Edit Guest Details, Timings or Rate"
+                        >
+                          <Edit3 className="h-3 w-3 text-slate-600" /> Edit Stay
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => onOpenCheckOut(activeRes)}
@@ -682,13 +724,25 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                   )}
 
                   {room.status === 'RESERVED' && activeRes && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenCheckIn(activeRes)}
-                      className="w-full px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs flex items-center justify-center gap-1 shadow-2xs transition-colors"
-                    >
-                      <DoorOpen className="h-3.5 w-3.5" /> Check-In Guest
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {onOpenEditStay && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenEditStay(activeRes)}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded text-xs inline-flex items-center gap-1 transition-colors shrink-0"
+                          title="Edit Guest Details, Dates or Rate"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" /> Edit Stay
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onOpenCheckIn(activeRes)}
+                        className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs flex items-center justify-center gap-1 shadow-2xs transition-colors"
+                      >
+                        <DoorOpen className="h-3.5 w-3.5" /> Check-In Guest
+                      </button>
+                    </div>
                   )}
 
                   {(room.status === 'AVAILABLE' || room.status === 'CLEAN') && (
@@ -758,9 +812,9 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                     <button
                       type="button"
                       onClick={() => openEditRoom(room)}
-                      className="text-[10px] text-slate-500 hover:text-slate-900 font-semibold"
+                      className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-[10px] text-slate-700 hover:text-slate-900 font-bold inline-flex items-center gap-1 transition-colors"
                     >
-                      Edit Room
+                      <Edit3 className="h-2.5 w-2.5" /> Edit Room
                     </button>
                   </div>
                 </div>
@@ -913,12 +967,21 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                             Ready
                           </button>
                         )}
+                        {(room.status === 'OCCUPIED' || room.status === 'RESERVED') && activeRes && onOpenEditStay && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenEditStay(activeRes)}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 whitespace-nowrap"
+                          >
+                            <Edit3 className="h-3 w-3" /> Stay
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => openEditRoom(room)}
-                          className="px-2 py-1 text-slate-500 hover:text-slate-900 font-semibold text-[11px]"
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded font-semibold text-[11px] inline-flex items-center gap-1 whitespace-nowrap"
                         >
-                          Edit
+                          <Edit3 className="h-3 w-3" /> Room
                         </button>
                       </div>
                     </td>
@@ -950,7 +1013,7 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
             <form onSubmit={handleSaveRoom} className="space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Room Number / Name:</label>
+                  <label className="block text-slate-700 font-bold mb-1">Room Number / Code *:</label>
                   <input
                     type="text"
                     value={roomNumber}
@@ -962,57 +1025,110 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Floor / Zone:</label>
+                  <label className="block text-slate-700 font-bold mb-1">Room Name / Label (Optional):</label>
                   <input
                     type="text"
+                    value={roomName}
+                    onChange={(e) => setRoomName(e.target.value)}
+                    placeholder="e.g. Machhapuchhre Suite"
+                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Floor / Zone *:</label>
+                  <input
+                    type="text"
+                    list="floor-zone-suggestions"
                     value={floor}
                     onChange={(e) => setFloor(e.target.value)}
                     placeholder="e.g. Floor 1, Garden Lawn"
                     className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg"
                     required
                   />
+                  <datalist id="floor-zone-suggestions">
+                    {floors.map(f => (
+                      <option key={f} value={f} />
+                    ))}
+                    <option value="Ground Floor" />
+                    <option value="Floor 1" />
+                    <option value="Floor 2" />
+                    <option value="Garden Cottage Wing" />
+                    <option value="Rooftop Terrace" />
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Room Type Category:</label>
+                  <select
+                    value={roomTypeId}
+                    onChange={(e) => {
+                      setRoomTypeId(e.target.value);
+                      const sel = roomTypes.find(rt => rt.id === e.target.value);
+                      if (sel) {
+                        setPricePerNight(sel.basePrice);
+                        if (sel.extraGuestPrice) setExtraGuestPrice(sel.extraGuestPrice);
+                        if (sel.totalCapacity) setCapacity(sel.totalCapacity);
+                      }
+                    }}
+                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
+                  >
+                    {roomTypes.map(rt => (
+                      <option key={rt.id} value={rt.id}>{rt.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Room Type Category:</label>
-                <select
-                  value={roomTypeId}
-                  onChange={(e) => {
-                    setRoomTypeId(e.target.value);
-                    const sel = roomTypes.find(rt => rt.id === e.target.value);
-                    if (sel) setPricePerNight(sel.basePrice);
-                  }}
-                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
-                >
-                  {roomTypes.map(rt => (
-                    <option key={rt.id} value={rt.id}>{rt.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Price / Night ({settings.currencySymbol}):</label>
+                  <label className="block text-slate-700 font-bold mb-1">Nightly ({settings.currencySymbol}):</label>
                   <input
                     type="number"
                     min="0"
                     step="100"
                     value={pricePerNight}
                     onChange={(e) => setPricePerNight(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Max Capacity (Guests):</label>
+                  <label className="block text-slate-700 font-bold mb-1">Hourly ({settings.currencySymbol}):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={hourlyRate}
+                    onChange={(e) => setHourlyRate(Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Extra Guest:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={extraGuestPrice}
+                    onChange={(e) => setExtraGuestPrice(Number(e.target.value))}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Max Guests:</label>
                   <input
                     type="number"
                     min="1"
                     value={capacity}
                     onChange={(e) => setCapacity(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                     required
                   />
                 </div>

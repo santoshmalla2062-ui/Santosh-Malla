@@ -132,11 +132,15 @@ export function isValidFirestoreId(id: string): boolean {
   return typeof id === 'string' && id.length >= 2 && id.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(id);
 }
 
+export function isMasterOwnerEmail(email?: string | null): boolean {
+  return normalizeEmail(email) === MASTER_OWNER_EMAIL;
+}
+
 export function isMasterOwnerUser(
   user?: { email?: string | null; emailVerified?: boolean | null } | null
 ): boolean {
   if (!user) return false;
-  return Boolean(user.emailVerified && normalizeEmail(user.email) === MASTER_OWNER_EMAIL);
+  return Boolean(user.emailVerified && isMasterOwnerEmail(user.email));
 }
 
 export const isAppCreatorUser = isMasterOwnerUser;

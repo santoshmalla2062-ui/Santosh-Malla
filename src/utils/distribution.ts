@@ -1,5 +1,7 @@
-export const SHARED_APP_URL =
-  'https://ais-pre-ggorgk5h6owhq22zwzdgxh-666001801875.asia-southeast1.run.app';
+export const GITHUB_PAGES_URL =
+  'https://santoshmalla2062-ui.github.io/Santosh-Malla';
+
+export const SHARED_APP_URL = GITHUB_PAGES_URL;
 
 export const DEV_APP_URL =
   'https://ais-dev-ggorgk5h6owhq22zwzdgxh-666001801875.asia-southeast1.run.app';
@@ -35,7 +37,8 @@ export function isLocalOrDevPreviewUrl(rawUrl?: string | null): boolean {
   return (
     lower.includes('localhost') ||
     lower.includes('127.0.0.1') ||
-    lower.includes('ais-dev-')
+    lower.includes('ais-dev-') ||
+    lower.includes('ais-pre-')
   );
 }
 

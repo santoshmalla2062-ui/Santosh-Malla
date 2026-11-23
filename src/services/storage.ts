@@ -43,6 +43,8 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   defaultLanguage: 'en',
   fonepayMerchantName: 'HIMALAYAN BREEZE HOSPITALITY PVT LTD',
   sessionTimeoutMinutes: 60,
+  hotelCheckInTime: '14:00',
+  hotelCheckOutTime: '12:00',
   notificationSettings: {
     enableSoundAlerts: true,
     enableOrderChime: true,
@@ -1991,32 +1993,231 @@ export const INITIAL_HOTEL_PAYMENTS: HotelPaymentRecord[] = [
   }
 ];
 
+export const CLEAN_TABLES_ROOMS: TableRoom[] = INITIAL_TABLES_ROOMS.map((tr) => ({
+  id: tr.id,
+  code: tr.code,
+  name: tr.name,
+  nepaliName: tr.nepaliName,
+  type: tr.type,
+  capacity: tr.capacity,
+  status: 'available' as const,
+  ...(typeof tr.ratePerNight === 'number' ? { ratePerNight: tr.ratePerNight } : {})
+}));
+
+export const CLEAN_INVENTORY: InventoryItem[] = INITIAL_INVENTORY.map((item) => ({
+  ...item,
+  currentStock: Math.max(item.currentStock, item.minStockAlert * 2),
+  lastUpdated: new Date().toISOString().split('T')[0]
+}));
+
+export const CLEAN_RESORT_ROOMS: ResortRoom[] = INITIAL_RESORT_ROOMS.map((rm) => ({
+  id: rm.id,
+  roomNumber: rm.roomNumber,
+  roomTypeId: rm.roomTypeId,
+  roomTypeName: rm.roomTypeName,
+  floor: rm.floor,
+  capacity: rm.capacity,
+  pricePerNight: rm.pricePerNight,
+  amenities: [...rm.amenities],
+  status: 'AVAILABLE' as const
+}));
+
+const LEGACY_DEMO_ORDER_IDS = new Set(['ord-active-1', 'ord-hist-1', 'ord-hist-2']);
+const LEGACY_DEMO_CUSTOMER_IDS = new Set(['c-1', 'c-2', 'c-3', 'c-4', 'cc-1']);
+const LEGACY_DEMO_KHATA_IDS = new Set(['kt-1', 'kt-2', 'kt-3']);
+const LEGACY_DEMO_EXPENSE_IDS = new Set(['exp-1', 'exp-2', 'exp-3']);
+const LEGACY_DEMO_DAY_CLOSING_IDS = new Set(['dc-1']);
+const LEGACY_DEMO_LOG_IDS = new Set(['log-1', 'log-2']);
+const LEGACY_DEMO_GUEST_IDS = new Set(['gp-101', 'gp-102', 'gp-103', 'gp-201', 'gp-c1']);
+const LEGACY_DEMO_RESERVATION_IDS = new Set(['res-101', 'res-102', 'res-103', 'res-201', 'res-c1']);
+const LEGACY_DEMO_FOLIO_IDS = new Set([
+  'fol-1', 'fol-2', 'fol-3', 'fol-4', 'fol-5', 'fol-6', 'fol-7', 'fol-8', 'fol-9', 'fol-10'
+]);
+const LEGACY_DEMO_HOUSEKEEPING_IDS = new Set(['hk-1', 'hk-2', 'hk-3']);
+const LEGACY_DEMO_MAINTENANCE_IDS = new Set(['mnt-1', 'mnt-2', 'mnt-3']);
+const LEGACY_DEMO_PAYMENT_IDS = new Set(['hpay-1', 'hpay-2', 'hpay-3', 'hpay-4', 'hpay-5']);
+
+/**
+ * Removes legacy seeded demo operational records (rooms showing fake guests/issues,
+ * sample orders, sample reservations, sample Khata dues, sample low-stock counts)
+ * without ever deleting user-created records.
+ */
+export function scrubLegacyDemoData(state: AppState): { state: AppState; changed: boolean } {
+  let changed = false;
+
+  const nextOrders = (state.orders || []).filter((o) => !LEGACY_DEMO_ORDER_IDS.has(o.id));
+  if (nextOrders.length !== (state.orders || []).length) changed = true;
+
+  const nextCustomers = (state.customers || []).filter((c) => !LEGACY_DEMO_CUSTOMER_IDS.has(c.id));
+  if (nextCustomers.length !== (state.customers || []).length) changed = true;
+
+  const nextKhata = (state.khataTransactions || []).filter((k) => !LEGACY_DEMO_KHATA_IDS.has(k.id));
+  if (nextKhata.length !== (state.khataTransactions || []).length) changed = true;
+
+  const nextExpenses = (state.expenses || []).filter((e) => !LEGACY_DEMO_EXPENSE_IDS.has(e.id));
+  if (nextExpenses.length !== (state.expenses || []).length) changed = true;
+
+  const nextClosings = (state.dayClosings || []).filter((d) => !LEGACY_DEMO_DAY_CLOSING_IDS.has(d.id));
+  if (nextClosings.length !== (state.dayClosings || []).length) changed = true;
+
+  const nextLogs = (state.inventoryLogs || []).filter((l) => !LEGACY_DEMO_LOG_IDS.has(l.id));
+  if (nextLogs.length !== (state.inventoryLogs || []).length) changed = true;
+
+  const nextGuests = (state.guestProfiles || []).filter((g) => !LEGACY_DEMO_GUEST_IDS.has(g.id));
+  if (nextGuests.length !== (state.guestProfiles || []).length) changed = true;
+
+  const nextReservations = (state.reservations || []).filter(
+    (r) => !LEGACY_DEMO_RESERVATION_IDS.has(r.id)
+  );
+  if (nextReservations.length !== (state.reservations || []).length) changed = true;
+
+  const nextFolios = (state.guestFolioItems || []).filter((f) => !LEGACY_DEMO_FOLIO_IDS.has(f.id));
+  if (nextFolios.length !== (state.guestFolioItems || []).length) changed = true;
+
+  const nextTasks = (state.housekeepingTasks || []).filter(
+    (t) => !LEGACY_DEMO_HOUSEKEEPING_IDS.has(t.id)
+  );
+  if (nextTasks.length !== (state.housekeepingTasks || []).length) changed = true;
+
+  const nextIssues = (state.maintenanceIssues || []).filter(
+    (m) => !LEGACY_DEMO_MAINTENANCE_IDS.has(m.id)
+  );
+  if (nextIssues.length !== (state.maintenanceIssues || []).length) changed = true;
+
+  const nextPayments = (state.hotelPayments || []).filter((p) => !LEGACY_DEMO_PAYMENT_IDS.has(p.id));
+  if (nextPayments.length !== (state.hotelPayments || []).length) changed = true;
+
+  const nextTables = (state.tablesRooms || []).map((tr) => {
+    const isDemoOrder = Boolean(tr.currentOrderId && LEGACY_DEMO_ORDER_IDS.has(tr.currentOrderId));
+    const hasLegacySeedDate = Boolean(
+      tr.checkInTime === '2026-09-30 14:00' || tr.checkInTime === '2026-10-01 11:30'
+    );
+    const hasUnlinkedDemoTableState =
+      (tr.id === 'tr-3' && tr.status === 'waiting_for_bill' && !tr.currentOrderId) ||
+      (tr.id === 'tr-4' && tr.status === 'reserved' && tr.guestName === 'Anil Shrestha') ||
+      (tr.id === 'tr-5' && tr.status === 'cleaning' && !tr.currentOrderId) ||
+      (tr.id === 'tr-6' && tr.status === 'out_of_service');
+    if (isDemoOrder || hasLegacySeedDate || hasUnlinkedDemoTableState) {
+      changed = true;
+      return {
+        ...tr,
+        status: 'available' as const,
+        currentOrderId: undefined,
+        guestName: undefined,
+        guestPhone: undefined,
+        checkInTime: undefined
+      };
+    }
+    return tr;
+  });
+
+  const nextRooms = (state.resortRooms || []).map((rm) => {
+    const isDemoRes = Boolean(
+      rm.currentReservationId && LEGACY_DEMO_RESERVATION_IDS.has(rm.currentReservationId)
+    );
+    const isLegacyNonAvailable =
+      (rm.id === 'r-105' && rm.status === 'DIRTY' && rm.lastCleanedTime === '2026-10-01 10:00') ||
+      (rm.id === 'r-203' && rm.status === 'OUT_OF_SERVICE' && rm.lastCleanedTime === '2026-09-29 16:00') ||
+      (rm.id === 'r-ctg2' && rm.status === 'CLEANING' && rm.lastCleanedTime === '2026-10-01 18:00') ||
+      (rm.id === 'r-vla1' && rm.status === 'MAINTENANCE' && rm.lastCleanedTime === '2026-09-30 15:00');
+    if (isDemoRes || isLegacyNonAvailable) {
+      changed = true;
+      return {
+        ...rm,
+        status: 'AVAILABLE' as const,
+        description: isLegacyNonAvailable ? undefined : rm.description,
+        currentGuestName: undefined,
+        currentGuestPhone: undefined,
+        currentReservationId: undefined,
+        checkInDate: undefined,
+        checkOutDate: undefined
+      };
+    }
+    return rm;
+  });
+
+  // Top up untouched demo low-stock items (inv-2: 1.5, inv-5: 3.2) so starter alerts stay clean
+  const nextInventory = (state.inventoryItems || []).map((inv) => {
+    if (inv.id === 'inv-2' && inv.currentStock === 1.5 && inv.lastUpdated === '2026-10-01') {
+      changed = true;
+      return { ...inv, currentStock: 10 };
+    }
+    if (inv.id === 'inv-5' && inv.currentStock === 3.2 && inv.lastUpdated === '2026-09-30') {
+      changed = true;
+      return { ...inv, currentStock: 8 };
+    }
+    return inv;
+  });
+
+  const nextActiveOrderId =
+    state.activeOrderId && LEGACY_DEMO_ORDER_IDS.has(state.activeOrderId)
+      ? undefined
+      : state.activeOrderId;
+  if (nextActiveOrderId !== state.activeOrderId) changed = true;
+
+  if (!changed) {
+    return { state, changed: false };
+  }
+
+  return {
+    changed: true,
+    state: {
+      ...state,
+      orders: nextOrders,
+      customers: nextCustomers,
+      khataTransactions: nextKhata,
+      expenses: nextExpenses,
+      dayClosings: nextClosings,
+      inventoryLogs: nextLogs,
+      inventoryItems: nextInventory,
+      tablesRooms: nextTables,
+      resortRooms: nextRooms,
+      guestProfiles: nextGuests,
+      reservations: nextReservations,
+      guestFolioItems: nextFolios,
+      housekeepingTasks: nextTasks,
+      maintenanceIssues: nextIssues,
+      hotelPayments: nextPayments,
+      activeOrderId: nextActiveOrderId
+    }
+  };
+}
+
+export function getCleanStarterState(preserveSettings?: BusinessSettings, preserveStaff?: StaffUser[]): AppState {
+  return {
+    menuItems: INITIAL_MENU_ITEMS,
+    tablesRooms: CLEAN_TABLES_ROOMS,
+    orders: [],
+    inventoryItems: CLEAN_INVENTORY,
+    inventoryLogs: [],
+    customers: [],
+    khataTransactions: [],
+    expenses: [],
+    dayClosings: [],
+    staffUsers: preserveStaff && preserveStaff.length > 0 ? preserveStaff : INITIAL_STAFF_USERS,
+    auditLogs: [],
+    settings: preserveSettings
+      ? {
+          ...DEFAULT_SETTINGS,
+          ...preserveSettings
+        }
+      : DEFAULT_SETTINGS,
+    activeOrderId: undefined,
+    roomTypes: INITIAL_ROOM_TYPES,
+    resortRooms: CLEAN_RESORT_ROOMS,
+    guestProfiles: [],
+    reservations: [],
+    guestFolioItems: [],
+    resortServices: INITIAL_RESORT_SERVICES,
+    housekeepingTasks: [],
+    maintenanceIssues: [],
+    hotelPayments: []
+  };
+}
+
 export function getInitialAppState(): AppState {
   if (typeof window === 'undefined') {
-    return {
-      menuItems: INITIAL_MENU_ITEMS,
-      tablesRooms: INITIAL_TABLES_ROOMS,
-      orders: INITIAL_ORDERS,
-      inventoryItems: INITIAL_INVENTORY,
-      inventoryLogs: INITIAL_LOGS,
-      customers: INITIAL_CUSTOMERS,
-      khataTransactions: INITIAL_KHATA,
-      expenses: INITIAL_EXPENSES,
-      dayClosings: INITIAL_DAY_CLOSINGS,
-      staffUsers: INITIAL_STAFF_USERS,
-      auditLogs: INITIAL_AUDIT_LOGS,
-      settings: DEFAULT_SETTINGS,
-      activeOrderId: 'ord-active-1',
-      roomTypes: INITIAL_ROOM_TYPES,
-      resortRooms: INITIAL_RESORT_ROOMS,
-      guestProfiles: INITIAL_GUEST_PROFILES,
-      reservations: INITIAL_RESERVATIONS,
-      guestFolioItems: INITIAL_GUEST_FOLIOS,
-      resortServices: INITIAL_RESORT_SERVICES,
-      housekeepingTasks: INITIAL_HOUSEKEEPING_TASKS,
-      maintenanceIssues: INITIAL_MAINTENANCE_ISSUES,
-      hotelPayments: INITIAL_HOTEL_PAYMENTS
-    };
+    return getCleanStarterState();
   }
 
   try {
@@ -2026,51 +2227,27 @@ export function getInitialAppState(): AppState {
       if (parsed && parsed.menuItems && parsed.orders && parsed.inventoryItems) {
         return {
           ...parsed,
-          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : INITIAL_EXPENSES,
-          dayClosings: Array.isArray(parsed.dayClosings) ? parsed.dayClosings : INITIAL_DAY_CLOSINGS,
+          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+          dayClosings: Array.isArray(parsed.dayClosings) ? parsed.dayClosings : [],
           staffUsers: (Array.isArray(parsed.staffUsers) && parsed.staffUsers.length > 0) ? parsed.staffUsers : INITIAL_STAFF_USERS,
-          auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : INITIAL_AUDIT_LOGS,
+          auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
           roomTypes: Array.isArray(parsed.roomTypes) ? parsed.roomTypes : INITIAL_ROOM_TYPES,
-          resortRooms: Array.isArray(parsed.resortRooms) ? parsed.resortRooms : INITIAL_RESORT_ROOMS,
-          guestProfiles: Array.isArray(parsed.guestProfiles) ? parsed.guestProfiles : INITIAL_GUEST_PROFILES,
-          reservations: Array.isArray(parsed.reservations) ? parsed.reservations : INITIAL_RESERVATIONS,
-          guestFolioItems: Array.isArray(parsed.guestFolioItems) ? parsed.guestFolioItems : INITIAL_GUEST_FOLIOS,
+          resortRooms: Array.isArray(parsed.resortRooms) ? parsed.resortRooms : CLEAN_RESORT_ROOMS,
+          guestProfiles: Array.isArray(parsed.guestProfiles) ? parsed.guestProfiles : [],
+          reservations: Array.isArray(parsed.reservations) ? parsed.reservations : [],
+          guestFolioItems: Array.isArray(parsed.guestFolioItems) ? parsed.guestFolioItems : [],
           resortServices: Array.isArray(parsed.resortServices) ? parsed.resortServices : INITIAL_RESORT_SERVICES,
-          housekeepingTasks: Array.isArray(parsed.housekeepingTasks) ? parsed.housekeepingTasks : INITIAL_HOUSEKEEPING_TASKS,
-          maintenanceIssues: Array.isArray(parsed.maintenanceIssues) ? parsed.maintenanceIssues : INITIAL_MAINTENANCE_ISSUES,
-          hotelPayments: Array.isArray(parsed.hotelPayments) ? parsed.hotelPayments : INITIAL_HOTEL_PAYMENTS
+          housekeepingTasks: Array.isArray(parsed.housekeepingTasks) ? parsed.housekeepingTasks : [],
+          maintenanceIssues: Array.isArray(parsed.maintenanceIssues) ? parsed.maintenanceIssues : [],
+          hotelPayments: Array.isArray(parsed.hotelPayments) ? parsed.hotelPayments : []
         };
       }
     }
   } catch (e) {
-    console.error('Failed to parse state from localStorage, falling back to defaults', e);
+    console.error('Failed to parse state from localStorage, falling back to clean defaults', e);
   }
 
-  const defaultState: AppState = {
-    menuItems: INITIAL_MENU_ITEMS,
-    tablesRooms: INITIAL_TABLES_ROOMS,
-    orders: INITIAL_ORDERS,
-    inventoryItems: INITIAL_INVENTORY,
-    inventoryLogs: INITIAL_LOGS,
-    customers: INITIAL_CUSTOMERS,
-    khataTransactions: INITIAL_KHATA,
-    expenses: INITIAL_EXPENSES,
-    dayClosings: INITIAL_DAY_CLOSINGS,
-    staffUsers: INITIAL_STAFF_USERS,
-    auditLogs: INITIAL_AUDIT_LOGS,
-    settings: DEFAULT_SETTINGS,
-    activeOrderId: 'ord-active-1',
-    roomTypes: INITIAL_ROOM_TYPES,
-    resortRooms: INITIAL_RESORT_ROOMS,
-    guestProfiles: INITIAL_GUEST_PROFILES,
-    reservations: INITIAL_RESERVATIONS,
-    guestFolioItems: INITIAL_GUEST_FOLIOS,
-    resortServices: INITIAL_RESORT_SERVICES,
-    housekeepingTasks: INITIAL_HOUSEKEEPING_TASKS,
-    maintenanceIssues: INITIAL_MAINTENANCE_ISSUES,
-    hotelPayments: INITIAL_HOTEL_PAYMENTS
-  };
-
+  const defaultState = getCleanStarterState();
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultState));

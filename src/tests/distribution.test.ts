@@ -95,3 +95,15 @@ test('Distribution: Sanitizes Android .APK URLs, converts Google Drive links, an
   assert.ok(DEFAULT_ANDROID_APK_URL.includes('1CLnOe7tdTQYTcgsbV9RrPKSDrgKqz_Ws'));
 });
 
+test('Distribution: Flags ais-pre AI Studio preview hosts and falls back to GitHub Pages live URL', () => {
+  assert.equal(
+    SHARED_APP_URL,
+    'https://santoshmalla2062-ui.github.io/Santosh-Malla'
+  );
+  assert.equal(
+    resolveDefaultPublicAppUrl('https://ais-pre-sample123.asia-southeast1.run.app'),
+    SHARED_APP_URL
+  );
+});
+
+

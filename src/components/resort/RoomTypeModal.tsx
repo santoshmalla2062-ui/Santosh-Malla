@@ -18,7 +18,7 @@ interface RoomTypeModalProps {
   settings: BusinessSettings;
   currentSession: Session | null;
   lang: Language;
-  onSaveRoomType: (roomType: RoomType) => void;
+  onSaveRoomType: (roomType: RoomType, syncRooms?: boolean) => void;
   onArchiveRoomType: (roomTypeId: string) => void;
   onClose: () => void;
 }
@@ -45,6 +45,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
   const [amenitiesStr, setAmenitiesStr] = useState('Mountain View, High-Speed WiFi, Hot Shower, Electric Kettle');
   const [imageUrl, setImageUrl] = useState('');
   const [isActive, setIsActive] = useState<boolean>(true);
+  const [syncToExistingRooms, setSyncToExistingRooms] = useState<boolean>(true);
 
   const startEdit = (rt: RoomType) => {
     setEditingType(rt);
@@ -103,7 +104,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
       isActive
     };
 
-    onSaveRoomType(typeData);
+    onSaveRoomType(typeData, Boolean(editingType && syncToExistingRooms));
     resetForm();
   };
 
@@ -334,17 +335,35 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="isActiveCheck"
-                  checked={isActive}
-                  onChange={(e) => setIsActive(e.target.checked)}
-                  className="h-4 w-4 text-emerald-800 rounded border-slate-300"
-                />
-                <label htmlFor="isActiveCheck" className="text-slate-800 font-semibold cursor-pointer">
-                  Active for bookings
-                </label>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isActiveCheck"
+                    checked={isActive}
+                    onChange={(e) => setIsActive(e.target.checked)}
+                    className="h-4 w-4 text-emerald-800 rounded border-slate-300"
+                  />
+                  <label htmlFor="isActiveCheck" className="text-slate-800 font-semibold cursor-pointer">
+                    Active for bookings
+                  </label>
+                </div>
+
+                {editingType && (
+                  <label className="flex items-center gap-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={syncToExistingRooms}
+                      onChange={(e) => setSyncToExistingRooms(e.target.checked)}
+                      className="h-4 w-4 text-emerald-800 rounded border-emerald-400"
+                    />
+                    <span className="text-[11px]">
+                      {lang === 'ne'
+                        ? 'यस वर्गका सबै कोठामा नयाँ मूल्य र क्षमता लागू गर्नुहोस्'
+                        : 'Apply updated rate, name & capacity to all existing rooms in this category'}
+                    </span>
+                  </label>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">

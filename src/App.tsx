@@ -32,29 +32,9 @@ import {
 } from './types';
 import { 
   getInitialAppState, 
+  getCleanStarterState,
   saveAppState, 
-  exportBackupJSON, 
-  INITIAL_MENU_ITEMS, 
-  INITIAL_TABLES_ROOMS, 
-  INITIAL_ORDERS, 
-  INITIAL_INVENTORY, 
-  INITIAL_LOGS, 
-  INITIAL_CUSTOMERS, 
-  INITIAL_KHATA, 
-  INITIAL_EXPENSES,
-  INITIAL_DAY_CLOSINGS,
-  INITIAL_STAFF_USERS,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_ROOM_TYPES,
-  INITIAL_RESORT_ROOMS,
-  INITIAL_GUEST_PROFILES,
-  INITIAL_RESERVATIONS,
-  INITIAL_GUEST_FOLIOS,
-  INITIAL_RESORT_SERVICES,
-  INITIAL_HOUSEKEEPING_TASKS,
-  INITIAL_MAINTENANCE_ISSUES,
-  INITIAL_HOTEL_PAYMENTS,
-  DEFAULT_SETTINGS 
+  exportBackupJSON
 } from './services/storage';
 import { 
   acceptStaffInvitation,
@@ -97,6 +77,7 @@ import {
   canRoleWriteChannel,
   extractChannelPayload,
   fetchOlderShardedOrdersPage,
+  isMasterOwnerEmail,
   isMasterOwnerUser,
   isValidFirestoreId,
   listAllCloudBusinessesForCreator,
@@ -263,6 +244,18 @@ export default function App() {
     const existing = getCurrentSession();
     return existing || null;
   });
+
+  // Ensure Master Owner email is never left remembered on login screen
+  useEffect(() => {
+    try {
+      const remembered = (localStorage.getItem('hb_remembered_login_email') || '').trim();
+      if (remembered && isMasterOwnerEmail(remembered)) {
+        localStorage.removeItem('hb_remembered_login_email');
+      }
+    } catch {
+      // Ignore storage access restrictions
+    }
+  }, []);
 
   const [showLoginModal, setShowLoginModal] = useState<boolean>(() => !getCurrentSession());
   const [showDownloadPortal, setShowDownloadPortal] = useState<boolean>(() =>
@@ -615,7 +608,7 @@ export default function App() {
       explicitGoogleSignInRef.current = true;
       try {
         try {
-          if (rememberMe) {
+          if (rememberMe && !isMasterOwnerEmail(email)) {
             localStorage.setItem('hb_remembered_login_email', email.trim().toLowerCase());
           } else {
             localStorage.removeItem('hb_remembered_login_email');
@@ -703,8 +696,10 @@ export default function App() {
       setCloudAuthError(null);
       try {
         try {
-          if (rememberMe) {
+          if (rememberMe && !isMasterOwnerEmail(email)) {
             localStorage.setItem('hb_remembered_login_email', email.trim().toLowerCase());
+          } else {
+            localStorage.removeItem('hb_remembered_login_email');
           }
         } catch {
           // Ignore storage issues
@@ -3589,43 +3584,27 @@ export default function App() {
       return;
     }
 
+    const baseClean = getCleanStarterState(appStateRef.current.settings, appStateRef.current.staffUsers);
     const freshState: AppState = {
-      menuItems: INITIAL_MENU_ITEMS,
-      tablesRooms: INITIAL_TABLES_ROOMS,
-      orders: INITIAL_ORDERS,
-      inventoryItems: INITIAL_INVENTORY,
-      inventoryLogs: INITIAL_LOGS,
-      customers: INITIAL_CUSTOMERS,
-      khataTransactions: INITIAL_KHATA,
-      expenses: INITIAL_EXPENSES,
-      dayClosings: INITIAL_DAY_CLOSINGS,
-      staffUsers: INITIAL_STAFF_USERS,
+      ...baseClean,
+      businessId: activeBusiness.businessId,
       auditLogs: [
         {
           id: 'audit-reset-' + Date.now(),
+          businessId: activeBusiness.businessId,
           staffId: currentSession?.staffId || 'admin',
           staffName: currentSession?.name || 'Administrator',
           role: currentSession?.role || 'OWNER',
-          action: 'DEMO_DATA_RESET',
-          details: 'Application database reset to initial secure state.',
+          action: 'DEMO_DATA_CLEARED',
+          details: 'Cleared all demo records and reset to a clean production state.',
           timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          severity: 'WARNING'
+          severity: 'INFO'
         }
-      ],
-      settings: DEFAULT_SETTINGS,
-      activeOrderId: 'ord-active-1',
-      roomTypes: INITIAL_ROOM_TYPES,
-      resortRooms: INITIAL_RESORT_ROOMS,
-      guestProfiles: INITIAL_GUEST_PROFILES,
-      reservations: INITIAL_RESERVATIONS,
-      guestFolioItems: INITIAL_GUEST_FOLIOS,
-      resortServices: INITIAL_RESORT_SERVICES,
-      housekeepingTasks: INITIAL_HOUSEKEEPING_TASKS,
-      maintenanceIssues: INITIAL_MAINTENANCE_ISSUES,
-      hotelPayments: INITIAL_HOTEL_PAYMENTS
+      ]
     };
     setAppState(freshState);
     saveAppState(freshState);
+    saveTenantAppState(activeBusiness.businessId, freshState);
     playChime('success');
   };
 
@@ -4299,6 +4278,7 @@ export default function App() {
         tagline={appState.settings?.tagline}
         lang={language}
         androidApkUrl={appState.settings?.androidApkUrl}
+        publicAppUrl={appState.settings?.publicAppUrl}
         onLanguageChange={setLanguage}
         onContinueToApp={handleCloseDownloadPortal}
         isSignedInSession={!!currentSession}
@@ -4309,12 +4289,22 @@ export default function App() {
         businessName={activeBusiness.businessName}
         lang={language}
         androidApkUrl={appState.settings?.androidApkUrl}
+        publicAppUrl={appState.settings?.publicAppUrl}
         onSaveAndroidApkUrl={(apkUrl) =>
           setAppState((prev) => ({
             ...prev,
             settings: {
               ...prev.settings,
               androidApkUrl: apkUrl || undefined
+            }
+          }))
+        }
+        onSavePublicAppUrl={(publicUrl) =>
+          setAppState((prev) => ({
+            ...prev,
+            settings: {
+              ...prev.settings,
+              publicAppUrl: publicUrl || undefined
             }
           }))
         }

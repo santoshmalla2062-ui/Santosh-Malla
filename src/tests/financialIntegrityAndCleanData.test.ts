@@ -364,3 +364,84 @@ test('Sequence Isolation & Idempotency: previews never increment counters and te
   assert.strictEqual(nextTenantA, 'KOT-003');
   assert.strictEqual(nextTenantB, 'KOT-001');
 });
+
+test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Masking', async () => {
+  const {
+    getInitialAppState,
+    getCleanStarterState,
+    scrubLegacyDemoData,
+    INITIAL_ORDERS,
+    INITIAL_CUSTOMERS,
+    INITIAL_RESERVATIONS,
+    INITIAL_GUEST_PROFILES,
+    INITIAL_GUEST_FOLIOS,
+    INITIAL_HOTEL_PAYMENTS
+  } = await import('../services/storage');
+  const { isMasterOwnerEmail, MASTER_OWNER_EMAIL } = await import('../services/cloudSyncService');
+
+  const initial = getInitialAppState();
+  assert.strictEqual(initial.orders.length, 0);
+  assert.strictEqual(initial.customers.length, 0);
+  assert.strictEqual(initial.reservations.length, 0);
+  assert.strictEqual(initial.guestProfiles.length, 0);
+  assert.strictEqual(initial.guestFolioItems.length, 0);
+  assert.strictEqual(initial.hotelPayments.length, 0);
+  assert.strictEqual(initial.expenses.length, 0);
+  assert.strictEqual(initial.dayClosings.length, 0);
+  assert.strictEqual(initial.settings.hotelCheckInTime, '14:00');
+  assert.strictEqual(initial.settings.hotelCheckOutTime, '12:00');
+  assert.ok(initial.resortRooms.every(r => r.status === 'AVAILABLE' && !r.currentGuestName));
+
+  // Scrubbing a state loaded with legacy demo constants removes demo records without erasing non-demo records
+  const customOrder: Order = {
+    id: 'ord-real-999',
+    invoiceNo: 'INV-2026-9999',
+    kotNo: 'KOT-999',
+    tableRoomId: 'tr-1',
+    tableRoomName: 'T-1',
+    tableRoomType: 'table',
+    orderType: 'dine_in',
+    items: [],
+    subtotal: 200,
+    discountPercent: 0,
+    discountAmount: 0,
+    serviceChargeAmount: 0,
+    vatAmount: 0,
+    grandTotal: 200,
+    paidAmount: 200,
+    dueAmount: 0,
+    paymentMethod: 'cash',
+    paymentStatus: 'paid',
+    createdAt: '2026-11-23T10:00:00Z',
+    status: 'completed'
+  };
+  const legacyMixedState = {
+    ...initial,
+    orders: [...INITIAL_ORDERS, customOrder],
+    customers: INITIAL_CUSTOMERS,
+    reservations: INITIAL_RESERVATIONS,
+    guestProfiles: INITIAL_GUEST_PROFILES,
+    guestFolioItems: INITIAL_GUEST_FOLIOS,
+    hotelPayments: INITIAL_HOTEL_PAYMENTS
+  };
+
+  const { state: scrubbed, changed } = scrubLegacyDemoData(legacyMixedState);
+  assert.strictEqual(changed, true);
+  assert.strictEqual(scrubbed.orders.length, 1);
+  assert.strictEqual(scrubbed.orders[0].id, 'ord-real-999');
+  assert.strictEqual(scrubbed.customers.length, 0);
+  assert.strictEqual(scrubbed.reservations.length, 0);
+  assert.strictEqual(scrubbed.guestProfiles.length, 0);
+  assert.strictEqual(scrubbed.guestFolioItems.length, 0);
+  assert.strictEqual(scrubbed.hotelPayments.length, 0);
+
+  const cleanReset = getCleanStarterState(initial.settings, initial.staffUsers);
+  assert.strictEqual(cleanReset.orders.length, 0);
+  assert.strictEqual(cleanReset.reservations.length, 0);
+
+  // Master Owner email detection (for masking / never auto-prefilling in LoginModal)
+  assert.strictEqual(isMasterOwnerEmail(MASTER_OWNER_EMAIL), true);
+  assert.strictEqual(isMasterOwnerEmail(`  ${MASTER_OWNER_EMAIL.toUpperCase()}  `), true);
+  assert.strictEqual(isMasterOwnerEmail('staff@himalayanbreeze.np'), false);
+});
+

@@ -860,6 +860,9 @@ export interface BusinessSettings {
   tableAreas?: string[];
   quickCashNotes?: number[];
   androidApkUrl?: string;
+  publicAppUrl?: string;
+  hotelCheckInTime?: string;
+  hotelCheckOutTime?: string;
 }
 
 export interface RoomType {
@@ -891,11 +894,14 @@ export type ResortRoomStatus =
 export interface ResortRoom {
   id: string;
   roomNumber: string;
+  roomName?: string;
   roomTypeId: string;
   roomTypeName: string;
   floor: string;
   capacity: number;
   pricePerNight: number;
+  hourlyRate?: number;
+  extraGuestPrice?: number;
   amenities: string[];
   imageUrl?: string;
   description?: string;
@@ -941,12 +947,18 @@ export interface Reservation {
   guestName: string;
   guestPhone: string;
   guestEmail?: string;
+  guestAddress?: string;
+  guestCountry?: string;
+  idType?: GuestProfile['idType'];
+  idNumber?: string;
   roomId: string;
   roomNumber: string;
   roomTypeId: string;
   roomTypeName: string;
   checkInDate: string;
   checkOutDate: string;
+  checkInTime?: string;
+  checkOutTime?: string;
   adults: number;
   children: number;
   nightsCount: number;

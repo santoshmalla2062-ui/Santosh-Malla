@@ -25,7 +25,8 @@ import {
   DEFAULT_ANDROID_APK_URL,
   buildAppDownloadUrl,
   resolveDefaultPublicAppUrl,
-  sanitizeAndroidApkUrl
+  sanitizeAndroidApkUrl,
+  sanitizePublicBaseUrl
 } from '../../utils/distribution';
 
 interface AppDownloadModalProps {
@@ -34,6 +35,7 @@ interface AppDownloadModalProps {
   tagline?: string;
   lang: Language;
   androidApkUrl?: string;
+  publicAppUrl?: string;
   onLanguageChange?: (lang: Language) => void;
   onContinueToApp: () => void;
   isSignedInSession?: boolean;
@@ -45,6 +47,7 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
   tagline,
   lang,
   androidApkUrl,
+  publicAppUrl,
   onLanguageChange,
   onContinueToApp,
   isSignedInSession = false
@@ -71,8 +74,10 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
   const effectiveApkUrl = sanitizeAndroidApkUrl(
     apkParam || androidApkUrl || DEFAULT_ANDROID_APK_URL
   );
+  const effectiveBaseUrl =
+    sanitizePublicBaseUrl(publicAppUrl || '') || resolveDefaultPublicAppUrl(currentOrigin);
   const shareableInstallUrl = buildAppDownloadUrl(
-    resolveDefaultPublicAppUrl(currentOrigin),
+    effectiveBaseUrl,
     bizParam,
     effectiveApkUrl || undefined
   );

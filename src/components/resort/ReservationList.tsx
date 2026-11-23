@@ -13,7 +13,8 @@ import {
   CreditCard, 
   Clock, 
   CheckCircle, 
-  AlertCircle 
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { 
   BusinessSettings, 
@@ -35,6 +36,7 @@ interface ReservationListProps {
   onOpenFolio: (reservation: Reservation) => void;
   onCancelReservation: (reservationId: string, reason: string) => void;
   onOpenNewBooking: () => void;
+  onOpenEditReservation?: (reservation: Reservation) => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -47,7 +49,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onOpenCheckOut,
   onOpenFolio,
   onCancelReservation,
-  onOpenNewBooking
+  onOpenNewBooking,
+  onOpenEditReservation
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -193,7 +196,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                     <td className="py-2.5 px-3 text-slate-600 text-[11px]">
                       <p><span className="font-semibold text-slate-800">{res.checkInDate}</span> to <span className="font-semibold text-slate-800">{res.checkOutDate}</span></p>
-                      <p className="text-[10px] text-slate-400">{res.nightsCount} Nights · {res.adults} Adults</p>
+                      <p className="text-[10px] text-slate-400">
+                        {res.nightsCount} Nights · {res.adults} Adults
+                        {(res.checkInTime || res.checkOutTime) ? ` · ${res.checkInTime || '14:00'}/${res.checkOutTime || '12:00'}` : ''}
+                      </p>
                     </td>
 
                     <td className="py-2.5 px-3 text-right font-mono-num font-bold text-slate-900">
@@ -219,6 +225,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {onOpenEditReservation && (res.status === 'CONFIRMED' || res.status === 'PENDING' || res.status === 'CHECKED_IN') && (
+                          <button
+                            onClick={() => onOpenEditReservation(res)}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-semibold text-[11px] flex items-center gap-1"
+                            title="Edit Guest Details, Stay Dates, Timings or Rate"
+                          >
+                            <Edit3 className="h-3 w-3" /> Edit
+                          </button>
+                        )}
                         {res.status === 'CONFIRMED' && (
                           <button
                             onClick={() => onOpenCheckIn(res)}

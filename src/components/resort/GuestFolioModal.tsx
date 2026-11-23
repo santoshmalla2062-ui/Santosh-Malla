@@ -15,7 +15,8 @@ import {
   DollarSign,
   ArrowRightLeft,
   AlertCircle,
-  CalendarPlus
+  CalendarPlus,
+  Edit3
 } from 'lucide-react';
 import { 
   BusinessSettings, 
@@ -53,6 +54,7 @@ interface GuestFolioModalProps {
     newCheckOutDate: string,
     reason?: string
   ) => { ok: boolean; error?: string } | void;
+  onOpenEditReservation?: () => void;
   onClose: () => void;
 }
 
@@ -70,6 +72,7 @@ export const GuestFolioModal: React.FC<GuestFolioModalProps> = ({
   onRecordPayment,
   onReassignRoom,
   onExtendStay,
+  onOpenEditReservation,
   onClose
 }) => {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -173,7 +176,7 @@ export const GuestFolioModal: React.FC<GuestFolioModalProps> = ({
                 <p className="text-[11px] text-slate-500">
                   Room {reservation.roomNumber} ({reservation.roomTypeName}) · {reservation.guestName} ·{' '}
                   <span className="font-semibold text-slate-700">
-                    {reservation.checkInDate} → {reservation.checkOutDate} ({reservation.nightsCount} Nights)
+                    {reservation.checkInDate}{reservation.checkInTime ? ` ${reservation.checkInTime}` : ''} → {reservation.checkOutDate}{reservation.checkOutTime ? ` ${reservation.checkOutTime}` : ''} ({reservation.nightsCount} Nights)
                   </span>
                 </p>
               </div>
@@ -238,6 +241,16 @@ export const GuestFolioModal: React.FC<GuestFolioModalProps> = ({
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
+                {onOpenEditReservation && (reservation.status === 'CHECKED_IN' || reservation.status === 'CONFIRMED' || reservation.status === 'PENDING') && (
+                  <button
+                    type="button"
+                    onClick={onOpenEditReservation}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-semibold text-xs transition-colors whitespace-nowrap shrink-0"
+                  >
+                    <Edit3 className="h-3.5 w-3.5 text-slate-700" />
+                    {lang === 'ne' ? 'बुकिङ / दर सम्पादन' : 'Edit Stay / Rate'}
+                  </button>
+                )}
                 {onExtendStay && (reservation.status === 'CHECKED_IN' || reservation.status === 'CONFIRMED') && (
                   <button
                     type="button"

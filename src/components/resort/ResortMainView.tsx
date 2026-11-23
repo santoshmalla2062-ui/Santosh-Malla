@@ -14,7 +14,8 @@ import {
   Hotel,
   ShieldCheck,
   Users,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Clock
 } from 'lucide-react';
 import { 
   AppState, 
@@ -47,8 +48,9 @@ import { RoomTypeModal } from './RoomTypeModal';
 import { ReservationList } from './ReservationList';
 import { ReservationCalendar } from './ReservationCalendar';
 import { NewReservationModal } from './NewReservationModal';
-import { CheckInModal } from './CheckInModal';
+import { CheckInModal, CheckInGuestStayUpdates } from './CheckInModal';
 import { CheckOutModal } from './CheckOutModal';
+import { EditReservationModal, ReservationEditPayload } from './EditReservationModal';
 import { GuestFolioModal } from './GuestFolioModal';
 import { HousekeepingBoard } from './HousekeepingBoard';
 import { MaintenanceModal } from './MaintenanceModal';
@@ -97,6 +99,7 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
   const [selectedResForCheckOut, setSelectedResForCheckOut] = useState<Reservation | null>(null);
   const [selectedResForFolio, setSelectedResForFolio] = useState<Reservation | null>(null);
   const [selectedFolioAction, setSelectedFolioAction] = useState<'charge' | 'payment' | 'reassign' | 'extend' | undefined>(undefined);
+  const [editingReservation, setEditingReservation] = useState<Reservation | null>(null);
   const [showNewReservationModal, setShowNewReservationModal] = useState(false);
   const [newBookingRoomId, setNewBookingRoomId] = useState<string | undefined>(undefined);
   const [newBookingDate, setNewBookingDate] = useState<string | undefined>(undefined);
@@ -105,6 +108,9 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
   const [showRoomTypeModal, setShowRoomTypeModal] = useState(false);
   const [showServicesModal, setShowServicesModal] = useState(false);
   const [showWorkflowTestModal, setShowWorkflowTestModal] = useState(false);
+  const [showTimingsModal, setShowTimingsModal] = useState(false);
+  const [defaultCheckInInput, setDefaultCheckInInput] = useState(settings.hotelCheckInTime || '14:00');
+  const [defaultCheckOutInput, setDefaultCheckOutInput] = useState(settings.hotelCheckOutTime || '12:00');
   const [maintenanceRoomDetails, setMaintenanceRoomDetails] = useState<{ id: string; number: string } | null>(null);
 
   // Sub-tab definitions
@@ -130,44 +136,79 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
     roomId: string,
     depositAmount: number,
     depositMethod: PaymentMethod,
-    guestUpdates?: { phone?: string; idType?: string; idNumber?: string },
+    guestUpdates?: CheckInGuestStayUpdates,
     notes?: string
   ) => {
     onUpdateAppState(prev => {
       const todayYMD = formatLocalYMD();
       const nowStr = `${todayYMD} ${new Date().toTimeString().substring(0, 5)}`;
       const currentRes = prev.reservations.find(r => r.id === reservationId);
-      const updatedPhone = guestUpdates?.phone?.trim() || currentRes?.guestPhone;
+      const updatedName = guestUpdates?.guestName?.trim() || currentRes?.guestName || 'Guest';
+      const updatedPhone = guestUpdates?.phone?.trim() || currentRes?.guestPhone || '';
+      const updatedEmail = guestUpdates?.email !== undefined ? guestUpdates.email.trim() || undefined : currentRes?.guestEmail;
+      const updatedAddress = guestUpdates?.address !== undefined ? guestUpdates.address.trim() || undefined : currentRes?.guestAddress;
+      const updatedCountry = guestUpdates?.country !== undefined ? guestUpdates.country.trim() || 'Nepal' : (currentRes?.guestCountry || 'Nepal');
+      const nextCheckInDate = guestUpdates?.checkInDate || currentRes?.checkInDate || todayYMD;
+      const nextCheckOutDate = guestUpdates?.checkOutDate || currentRes?.checkOutDate || todayYMD;
+      const nextCheckInTime = guestUpdates?.checkInTime || currentRes?.checkInTime || settings.hotelCheckInTime || '14:00';
+      const nextCheckOutTime = guestUpdates?.checkOutTime || currentRes?.checkOutTime || settings.hotelCheckOutTime || '12:00';
+      const nextNights = Math.max(
+        1,
+        Math.ceil((new Date(nextCheckOutDate).getTime() - new Date(nextCheckInDate).getTime()) / (1000 * 60 * 60 * 24))
+      );
+      const nextRate = guestUpdates?.roomRate !== undefined ? guestUpdates.roomRate : (currentRes?.roomRate || 0);
 
       // Update reservation
       const updatedReservations = prev.reservations.map(res => {
         if (res.id !== reservationId) return res;
+        const roomSubtotal = nextRate * nextNights;
+        const taxable = Math.max(0, roomSubtotal - (res.discountAmount || 0) + (res.extraCharges || 0));
+        const vatAmount = settings.enableVat ? Math.round((taxable * ((settings.vatRatePercent || 13) / 100)) * 100) / 100 : 0;
+        const totalAmount = Math.round((taxable + vatAmount) * 100) / 100;
         const newPaid = res.paidAmount + depositAmount;
-        const newRemaining = Math.max(0, res.totalAmount - newPaid);
+        const newRemaining = Math.max(0, Math.round((totalAmount - newPaid) * 100) / 100);
         return {
           ...res,
+          guestName: updatedName,
           guestPhone: updatedPhone || res.guestPhone,
+          guestEmail: updatedEmail,
+          guestAddress: updatedAddress,
+          guestCountry: updatedCountry,
+          idType: guestUpdates?.idType || res.idType,
+          idNumber: guestUpdates?.idNumber?.trim() || res.idNumber,
+          checkInDate: nextCheckInDate,
+          checkOutDate: nextCheckOutDate,
+          checkInTime: nextCheckInTime,
+          checkOutTime: nextCheckOutTime,
+          nightsCount: nextNights,
+          roomRate: nextRate,
+          taxAmount: vatAmount,
+          totalAmount,
           status: 'CHECKED_IN' as const,
           actualCheckInTime: nowStr,
           checkedInByStaff: currentSession?.name || 'Staff',
           paidAmount: newPaid,
           depositAmount: res.depositAmount + depositAmount,
           remainingAmount: newRemaining,
-          notes: notes ? `${res.notes ? res.notes + ' | ' : ''}${notes}` : res.notes
+          notes: notes !== undefined ? (notes.trim() || undefined) : res.notes
         };
       });
 
-      // Persist ID document details to guest profile
+      // Persist ID document & profile details to guest profile
       let updatedGuests = [...prev.guestProfiles];
       if (currentRes) {
         const gIdx = updatedGuests.findIndex(
           g => g.id === currentRes.guestId || g.phone === currentRes.guestPhone
         );
-        const safeIdType = (guestUpdates?.idType as GuestProfile['idType']) || 'Citizenship';
+        const safeIdType = (guestUpdates?.idType as GuestProfile['idType']) || currentRes.idType || 'Citizenship';
         if (gIdx >= 0) {
           updatedGuests[gIdx] = {
             ...updatedGuests[gIdx],
+            fullName: updatedName,
             phone: updatedPhone || updatedGuests[gIdx].phone,
+            email: updatedEmail !== undefined ? updatedEmail : updatedGuests[gIdx].email,
+            address: updatedAddress !== undefined ? updatedAddress : updatedGuests[gIdx].address,
+            country: updatedCountry || updatedGuests[gIdx].country,
             idType: safeIdType,
             idNumber: guestUpdates?.idNumber?.trim() || updatedGuests[gIdx].idNumber
           };
@@ -175,11 +216,11 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           updatedGuests = [
             {
               id: currentRes.guestId || 'gp-' + Date.now(),
-              fullName: currentRes.guestName,
+              fullName: updatedName,
               phone: updatedPhone || currentRes.guestPhone,
-              email: currentRes.guestEmail || '',
-              address: '',
-              country: 'Nepal',
+              email: updatedEmail || '',
+              address: updatedAddress || '',
+              country: updatedCountry || 'Nepal',
               idType: safeIdType,
               idNumber: guestUpdates?.idNumber?.trim() || '',
               totalStays: 1,
@@ -196,11 +237,11 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
         return {
           ...rm,
           status: 'OCCUPIED' as const,
-          currentGuestName: currentRes?.guestName || rm.currentGuestName,
+          currentGuestName: updatedName,
           currentGuestPhone: updatedPhone || rm.currentGuestPhone,
           currentReservationId: reservationId,
-          checkInDate: currentRes?.checkInDate || rm.checkInDate,
-          checkOutDate: currentRes?.checkOutDate || rm.checkOutDate
+          checkInDate: nextCheckInDate,
+          checkOutDate: nextCheckOutDate
         };
       });
 
@@ -212,7 +253,7 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
         const depositPaymentRec: HotelPaymentRecord = {
           id: 'hpay-' + Date.now(),
           reservationId: currentRes.id,
-          guestName: currentRes.guestName,
+          guestName: updatedName,
           roomNumber: currentRes.roomNumber,
           amount: depositAmount,
           method: depositMethod,
@@ -227,25 +268,35 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
         nextJournals = gl.journalEntries;
       }
 
-      // Add initial room charge to folio if not already present
-      const hasRoomCharge = prev.guestFolioItems.some(
+      // Add or update initial room charge in folio
+      const existingRoomIdx = prev.guestFolioItems.findIndex(
         f => f.reservationId === reservationId && f.category === 'ROOM'
       );
       const updatedFolios = [...prev.guestFolioItems];
-      if (!hasRoomCharge && currentRes) {
-        updatedFolios.push({
-          id: 'fol-' + Date.now(),
-          reservationId: currentRes.id,
-          roomId: currentRes.roomId,
-          roomNumber: currentRes.roomNumber,
-          dateTime: nowStr,
-          description: `${currentRes.roomTypeName} (${currentRes.nightsCount} Nights Accommodation)`,
-          category: 'ROOM',
-          quantity: currentRes.nightsCount,
-          unitPrice: currentRes.roomRate,
-          totalPrice: currentRes.roomRate * currentRes.nightsCount,
-          addedByStaff: currentSession?.name || 'Reception'
-        });
+      if (currentRes) {
+        if (existingRoomIdx >= 0) {
+          updatedFolios[existingRoomIdx] = {
+            ...updatedFolios[existingRoomIdx],
+            description: `${currentRes.roomTypeName} (${nextNights} Nights Accommodation)`,
+            quantity: nextNights,
+            unitPrice: nextRate,
+            totalPrice: nextRate * nextNights
+          };
+        } else {
+          updatedFolios.push({
+            id: 'fol-' + Date.now(),
+            reservationId: currentRes.id,
+            roomId: currentRes.roomId,
+            roomNumber: currentRes.roomNumber,
+            dateTime: nowStr,
+            description: `${currentRes.roomTypeName} (${nextNights} Nights Accommodation)`,
+            category: 'ROOM',
+            quantity: nextNights,
+            unitPrice: nextRate,
+            totalPrice: nextRate * nextNights,
+            addedByStaff: currentSession?.name || 'Reception'
+          });
+        }
       }
 
       return {
@@ -780,8 +831,8 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
     return { ok: true };
   };
 
-  // Save Room Type
-  const handleSaveRoomType = (roomType: RoomType) => {
+  // Save Room Type (optionally sync updated price/name/capacity to rooms of this category)
+  const handleSaveRoomType = (roomType: RoomType, syncRooms?: boolean) => {
     onUpdateAppState(prev => {
       const idx = prev.roomTypes.findIndex(rt => rt.id === roomType.id);
       const updatedTypes = [...prev.roomTypes];
@@ -790,8 +841,227 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
       } else {
         updatedTypes.push(roomType);
       }
-      return { ...prev, roomTypes: updatedTypes };
+      const updatedRooms = syncRooms
+        ? prev.resortRooms.map(rm =>
+            rm.roomTypeId === roomType.id
+              ? {
+                  ...rm,
+                  roomTypeName: roomType.name,
+                  pricePerNight: roomType.basePrice,
+                  extraGuestPrice: roomType.extraGuestPrice,
+                  capacity: roomType.totalCapacity || rm.capacity
+                }
+              : rm
+          )
+        : prev.resortRooms;
+      return { ...prev, roomTypes: updatedTypes, resortRooms: updatedRooms };
     });
+    recordAudit(
+      'ROOM_TYPE_SAVED',
+      roomType.id,
+      `Saved Room Type ${roomType.name} (${settings.currencySymbol} ${roomType.basePrice}${syncRooms ? ', synced to existing rooms' : ''})`,
+      'INFO'
+    );
+    playChime('success');
+  };
+
+  // Update Reservation / Active Stay (Guest details, Dates/Timings, Room, Rate, Discount, Adults/Children)
+  const handleUpdateReservation = (
+    reservationId: string,
+    updates: ReservationEditPayload
+  ): { ok: boolean; error?: string } => {
+    const existingRes = appState.reservations.find(r => r.id === reservationId);
+    if (!existingRes) {
+      return { ok: false, error: 'Reservation record not found.' };
+    }
+
+    const targetRoom = appState.resortRooms.find(rm => rm.id === updates.roomId);
+    if (!targetRoom) {
+      return { ok: false, error: 'Selected room does not exist.' };
+    }
+
+    // Double-booking validation against other active reservations
+    const overlappingBooking = appState.reservations.find(other => {
+      if (other.id === reservationId) return false;
+      if (other.roomId !== updates.roomId) return false;
+      if (other.status === 'CANCELLED' || other.status === 'CHECKED_OUT' || other.status === 'NO_SHOW') {
+        return false;
+      }
+      return other.checkInDate < updates.checkOutDate && other.checkOutDate > updates.checkInDate;
+    });
+
+    if (overlappingBooking) {
+      return {
+        ok: false,
+        error: `Room ${targetRoom.roomNumber} is already booked by ${overlappingBooking.guestName} (${overlappingBooking.checkInDate} → ${overlappingBooking.checkOutDate}).`
+      };
+    }
+
+    const nightsCount = Math.max(
+      1,
+      Math.ceil(
+        (new Date(updates.checkOutDate).getTime() - new Date(updates.checkInDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+      )
+    );
+
+    const roomSubtotal = updates.roomRate * nightsCount;
+    const taxable = Math.max(0, roomSubtotal - updates.discountAmount + (existingRes.extraCharges || 0));
+    const vatAmount = settings.enableVat
+      ? Math.round((taxable * ((settings.vatRatePercent || 13) / 100)) * 100) / 100
+      : 0;
+    const totalAmount = Math.round((taxable + vatAmount) * 100) / 100;
+    const remainingAmount = Math.max(0, Math.round((totalAmount - existingRes.paidAmount) * 100) / 100);
+
+    let updatedResSnapshot: Reservation | null = null;
+
+    onUpdateAppState(prev => {
+      const updatedReservations = prev.reservations.map(r => {
+        if (r.id !== reservationId) return r;
+        const nextRes: Reservation = {
+          ...r,
+          guestName: updates.guestName,
+          guestPhone: updates.guestPhone,
+          guestEmail: updates.guestEmail,
+          guestAddress: updates.guestAddress,
+          guestCountry: updates.guestCountry,
+          idType: updates.idType,
+          idNumber: updates.idNumber,
+          roomId: targetRoom.id,
+          roomNumber: targetRoom.roomNumber,
+          roomTypeId: targetRoom.roomTypeId,
+          roomTypeName: targetRoom.roomTypeName,
+          checkInDate: updates.checkInDate,
+          checkOutDate: updates.checkOutDate,
+          checkInTime: updates.checkInTime,
+          checkOutTime: updates.checkOutTime,
+          adults: updates.adults,
+          children: updates.children,
+          nightsCount,
+          roomRate: updates.roomRate,
+          discountAmount: updates.discountAmount,
+          taxAmount: vatAmount,
+          totalAmount,
+          remainingAmount,
+          bookingSource: updates.bookingSource,
+          notes: updates.notes
+        };
+        updatedResSnapshot = nextRes;
+        return nextRes;
+      });
+
+      // Sync guest profile
+      let updatedGuests = [...prev.guestProfiles];
+      const gIdx = updatedGuests.findIndex(
+        g => g.id === existingRes.guestId || g.phone === existingRes.guestPhone
+      );
+      if (gIdx >= 0) {
+        updatedGuests[gIdx] = {
+          ...updatedGuests[gIdx],
+          fullName: updates.guestName,
+          phone: updates.guestPhone,
+          email: updates.guestEmail ?? updatedGuests[gIdx].email,
+          address: updates.guestAddress ?? updatedGuests[gIdx].address,
+          country: updates.guestCountry || updatedGuests[gIdx].country,
+          idType: updates.idType || updatedGuests[gIdx].idType,
+          idNumber: updates.idNumber ?? updatedGuests[gIdx].idNumber
+        };
+      } else {
+        updatedGuests = [
+          {
+            id: existingRes.guestId || 'gp-' + Date.now(),
+            fullName: updates.guestName,
+            phone: updates.guestPhone,
+            email: updates.guestEmail || '',
+            address: updates.guestAddress || '',
+            country: updates.guestCountry || 'Nepal',
+            idType: updates.idType || 'Citizenship',
+            idNumber: updates.idNumber || '',
+            totalStays: 1,
+            createdAt: formatLocalYMD()
+          },
+          ...updatedGuests
+        ];
+      }
+
+      // Sync room record(s)
+      const roomChanged = existingRes.roomId !== targetRoom.id;
+      const isActiveOccupancy = existingRes.status === 'CHECKED_IN';
+      const isTodayReserved =
+        (existingRes.status === 'CONFIRMED' || existingRes.status === 'PENDING') &&
+        updates.checkInDate <= formatLocalYMD();
+
+      const updatedRooms = prev.resortRooms.map(rm => {
+        if (roomChanged && rm.id === existingRes.roomId && rm.currentReservationId === reservationId) {
+          return {
+            ...rm,
+            status: (isActiveOccupancy ? 'DIRTY' : 'AVAILABLE') as ResortRoomStatus,
+            currentGuestName: undefined,
+            currentGuestPhone: undefined,
+            currentReservationId: undefined,
+            checkInDate: undefined,
+            checkOutDate: undefined
+          };
+        }
+        if (rm.id === targetRoom.id && (isActiveOccupancy || isTodayReserved || rm.currentReservationId === reservationId)) {
+          return {
+            ...rm,
+            status: (isActiveOccupancy ? 'OCCUPIED' : isTodayReserved ? 'RESERVED' : rm.status) as ResortRoomStatus,
+            currentGuestName: updates.guestName,
+            currentGuestPhone: updates.guestPhone,
+            currentReservationId: reservationId,
+            checkInDate: updates.checkInDate,
+            checkOutDate: updates.checkOutDate
+          };
+        }
+        return rm;
+      });
+
+      // Update primary ROOM folio line item so folio & invoice match new nights/rate/room
+      let updatedPrimaryRoomFolio = false;
+      const updatedFolios = prev.guestFolioItems.map(f => {
+        if (f.reservationId !== reservationId) return f;
+        if (f.category === 'ROOM' && !updatedPrimaryRoomFolio) {
+          updatedPrimaryRoomFolio = true;
+          return {
+            ...f,
+            roomId: targetRoom.id,
+            roomNumber: targetRoom.roomNumber,
+            description: `${targetRoom.roomTypeName} (${nightsCount} Nights Accommodation)`,
+            quantity: nightsCount,
+            unitPrice: updates.roomRate,
+            totalPrice: updates.roomRate * nightsCount
+          };
+        }
+        return {
+          ...f,
+          roomId: targetRoom.id,
+          roomNumber: targetRoom.roomNumber
+        };
+      });
+
+      return {
+        ...prev,
+        reservations: updatedReservations,
+        guestProfiles: updatedGuests,
+        resortRooms: updatedRooms,
+        guestFolioItems: updatedFolios
+      };
+    });
+
+    if (selectedResForFolio && selectedResForFolio.id === reservationId && updatedResSnapshot) {
+      setSelectedResForFolio(updatedResSnapshot);
+    }
+
+    recordAudit(
+      'RESERVATION_UPDATED',
+      targetRoom.id,
+      `Updated booking #${reservationId} (${updates.guestName}, Room ${targetRoom.roomNumber}, ${updates.checkInDate}→${updates.checkOutDate}, Rate ${updates.roomRate})`,
+      'INFO'
+    );
+    playChime('success');
+    setEditingReservation(null);
+    return { ok: true };
   };
 
   // Archive Room Type
@@ -1077,6 +1347,19 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => {
+              setDefaultCheckInInput(settings.hotelCheckInTime || '14:00');
+              setDefaultCheckOutInput(settings.hotelCheckOutTime || '12:00');
+              setShowTimingsModal(true);
+            }}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0"
+            title="Configure Default Check-In & Check-Out Timings"
+          >
+            <Clock className="h-3.5 w-3.5 text-emerald-800" />
+            <span>{settings.hotelCheckInTime || '14:00'} / {settings.hotelCheckOutTime || '12:00'}</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowNightAuditModal(true)}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-950 hover:bg-black text-white rounded-lg font-bold shadow-2xs transition-colors whitespace-nowrap shrink-0"
           >
@@ -1160,6 +1443,8 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           onUpdateRoomStatus={handleUpdateRoomStatus}
           onSaveRoom={handleSaveRoom}
           onDeleteRoom={handleDeleteRoom}
+          onOpenRoomTypes={() => setShowRoomTypeModal(true)}
+          onOpenEditStay={(res) => setEditingReservation(res)}
         />
       )}
 
@@ -1175,6 +1460,7 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           onOpenFolio={(res) => setSelectedResForFolio(res)}
           onCancelReservation={handleCancelReservation}
           onOpenNewBooking={() => setShowNewReservationModal(true)}
+          onOpenEditReservation={(res) => setEditingReservation(res)}
         />
       )}
 
@@ -1406,6 +1692,10 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           onRecordPayment={handleRecordHotelPayment}
           onReassignRoom={handleReassignRoom}
           onExtendStay={handleExtendStay}
+          onOpenEditReservation={() => {
+            const currentRes = appState.reservations.find(r => r.id === selectedResForFolio.id) || selectedResForFolio;
+            setEditingReservation(currentRes);
+          }}
           onClose={() => {
             setSelectedResForFolio(null);
             setSelectedFolioAction(undefined);
@@ -1509,6 +1799,103 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           appState={appState}
           currentSession={currentSession}
         />
+      )}
+
+      {/* Edit Reservation / Active Stay Modal */}
+      {editingReservation && (
+        <EditReservationModal
+          reservation={editingReservation}
+          guestProfile={appState.guestProfiles.find(
+            g => g.id === editingReservation.guestId || g.phone === editingReservation.guestPhone
+          )}
+          rooms={appState.resortRooms}
+          existingReservations={appState.reservations}
+          settings={settings}
+          lang={lang}
+          onSave={handleUpdateReservation}
+          onClose={() => setEditingReservation(null)}
+        />
+      )}
+
+      {/* Property Default Check-In / Check-Out Timings Modal */}
+      {showTimingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-5 space-y-4 border border-slate-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-emerald-800" />
+                <h3 className="font-bold text-slate-900 text-sm">
+                  {lang === 'ne' ? 'होटल चेक-इन / चेक-आउट समय' : 'Standard Hotel Timings'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTimingsModal(false)}
+                className="text-slate-400 hover:text-slate-700 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {lang === 'ne'
+                ? 'नयाँ बुकिङ र चेक-इन गर्दा स्वतः भरिने मानक समय सेट गर्नुहोस्।'
+                : 'Default Check-In and Check-Out hours prefilled for new bookings and guest check-ins.'}
+            </p>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Standard Check-In:</label>
+                <input
+                  type="time"
+                  value={defaultCheckInInput}
+                  onChange={(e) => setDefaultCheckInInput(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Standard Check-Out:</label>
+                <input
+                  type="time"
+                  value={defaultCheckOutInput}
+                  onChange={(e) => setDefaultCheckOutInput(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowTimingsModal(false)}
+                className="px-3.5 py-1.5 bg-slate-100 text-slate-700 rounded-lg font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateAppState(prev => ({
+                    ...prev,
+                    settings: {
+                      ...prev.settings,
+                      hotelCheckInTime: defaultCheckInInput || '14:00',
+                      hotelCheckOutTime: defaultCheckOutInput || '12:00'
+                    }
+                  }));
+                  recordAudit(
+                    'HOTEL_TIMINGS_UPDATED',
+                    undefined,
+                    `Updated default Check-In ${defaultCheckInInput} / Check-Out ${defaultCheckOutInput}`,
+                    'INFO'
+                  );
+                  playChime('success');
+                  setShowTimingsModal(false);
+                }}
+                className="px-4 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg font-bold"
+              >
+                Save Timings
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

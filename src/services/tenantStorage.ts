@@ -18,24 +18,15 @@ import {
 } from '../types';
 import { 
   getInitialAppState, 
+  getCleanStarterState,
+  scrubLegacyDemoData,
   INITIAL_MENU_ITEMS, 
-  INITIAL_TABLES_ROOMS, 
-  INITIAL_ORDERS, 
-  INITIAL_INVENTORY, 
-  INITIAL_CUSTOMERS, 
-  INITIAL_EXPENSES, 
-  INITIAL_DAY_CLOSINGS, 
+  CLEAN_TABLES_ROOMS,
+  CLEAN_INVENTORY,
   INITIAL_STAFF_USERS, 
-  INITIAL_AUDIT_LOGS, 
   INITIAL_ROOM_TYPES, 
-  INITIAL_RESORT_ROOMS, 
-  INITIAL_GUEST_PROFILES, 
-  INITIAL_RESERVATIONS, 
-  INITIAL_GUEST_FOLIOS, 
+  CLEAN_RESORT_ROOMS,
   INITIAL_RESORT_SERVICES, 
-  INITIAL_HOUSEKEEPING_TASKS, 
-  INITIAL_MAINTENANCE_ISSUES, 
-  INITIAL_HOTEL_PAYMENTS,
   DEFAULT_SETTINGS,
   STORAGE_KEY
 } from './storage';
@@ -373,6 +364,8 @@ export function canUserAccessBusiness(user: { id: string; role?: StaffRole; busi
 
 function ensureTenantDefaults(state: AppState, businessId: string): AppState {
   if (!state.settings) state.settings = { ...DEFAULT_SETTINGS, businessId };
+  if (!state.settings.hotelCheckInTime) state.settings.hotelCheckInTime = '14:00';
+  if (!state.settings.hotelCheckOutTime) state.settings.hotelCheckOutTime = '12:00';
   if (!state.settings.paymentMethodsConfig || state.settings.paymentMethodsConfig.length === 0) {
     state.settings.paymentMethodsConfig = DEFAULT_PAYMENT_METHODS;
   }
@@ -453,11 +446,29 @@ export function loadTenantAppState(businessId: string): AppState {
   // 1. If Himalayan Breeze and legacy STORAGE_KEY exists, migrate or load it
   if (businessId === 'biz-himalayan-breeze') {
     const tenantKey = TENANT_STORAGE_PREFIX + businessId;
+    const scrubFlagKey = 'hb_demo_scrubbed_v1_' + businessId;
+    const alreadyScrubbed = localStorage.getItem(scrubFlagKey) === '1';
+
+    const finalizeHB = (rawState: AppState): AppState => {
+      const defaulted = ensureTenantDefaults(rawState, businessId);
+      if (alreadyScrubbed) return defaulted;
+      const { state: scrubbed, changed } = scrubLegacyDemoData(defaulted);
+      try {
+        localStorage.setItem(scrubFlagKey, '1');
+        if (changed) {
+          localStorage.setItem(tenantKey, JSON.stringify(scrubbed));
+        }
+      } catch {
+        // ignore storage restrictions
+      }
+      return scrubbed;
+    };
+
     const rawTenant = localStorage.getItem(tenantKey);
     if (rawTenant) {
       try {
         const parsed = JSON.parse(rawTenant);
-        return ensureTenantDefaults(parsed, businessId);
+        return finalizeHB(parsed);
       } catch {
         // fallback
       }
@@ -469,29 +480,49 @@ export function loadTenantAppState(businessId: string): AppState {
       try {
         const parsedLegacy = JSON.parse(rawLegacy);
         parsedLegacy.businessId = businessId;
-        const defaulted = ensureTenantDefaults(parsedLegacy, businessId);
-        // Save into tenant key
-        localStorage.setItem(tenantKey, JSON.stringify(defaulted));
-        return defaulted;
+        const cleaned = finalizeHB(parsedLegacy);
+        try {
+          localStorage.setItem(tenantKey, JSON.stringify(cleaned));
+        } catch {
+          // ignore
+        }
+        return cleaned;
       } catch {
         // fallback
       }
     }
 
-    const initialHB = ensureTenantDefaults(getInitialAppState(), businessId);
+    const initialHB = ensureTenantDefaults(getCleanStarterState(), businessId);
     initialHB.businessId = businessId;
-    localStorage.setItem(tenantKey, JSON.stringify(initialHB));
+    try {
+      localStorage.setItem(tenantKey, JSON.stringify(initialHB));
+      localStorage.setItem(scrubFlagKey, '1');
+    } catch {
+      // ignore
+    }
     return initialHB;
   }
 
   // 2. For other businesses, load from tenant storage
   const tenantKey = TENANT_STORAGE_PREFIX + businessId;
+  const scrubFlagKey = 'hb_demo_scrubbed_v1_' + businessId;
   const raw = localStorage.getItem(tenantKey);
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.menuItems) {
-        return ensureTenantDefaults(parsed, businessId);
+        const defaulted = ensureTenantDefaults(parsed, businessId);
+        if (localStorage.getItem(scrubFlagKey) !== '1') {
+          const { state: scrubbed, changed } = scrubLegacyDemoData(defaulted);
+          try {
+            localStorage.setItem(scrubFlagKey, '1');
+            if (changed) localStorage.setItem(tenantKey, JSON.stringify(scrubbed));
+          } catch {
+            // ignore
+          }
+          return scrubbed;
+        }
+        return defaulted;
       }
     } catch {
       // fallback to generated template
@@ -967,20 +998,6 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
       }
     ];
 
-    const cafeCustomers: Customer[] = [
-      {
-        id: 'cc-1',
-        name: 'Prakash Adhikari',
-        phone: '9846019283',
-        customerType: 'regular',
-        creditBalance: 0,
-        loyaltyPoints: 120,
-        totalSpend: 4500,
-        totalVisits: 14,
-        createdAt: '2026-09-18'
-      }
-    ];
-
     return {
       businessId: business.businessId,
       menuItems: cafeMenuItems,
@@ -988,24 +1005,12 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
       orders: [],
       inventoryItems: cafeInventory,
       inventoryLogs: [],
-      customers: cafeCustomers,
+      customers: [],
       khataTransactions: [],
       expenses: [],
       dayClosings: [],
       staffUsers: INITIAL_STAFF_USERS,
-      auditLogs: [
-        {
-          id: 'audit-annapurna-init',
-          businessId: business.businessId,
-          staffId: 'staff-admin-sys',
-          staffName: 'Bikash Gurung',
-          role: 'ADMIN',
-          action: 'BUSINESS_INITIALIZED',
-          details: 'Annapurna Specialty Coffee tenant workspace initialized with cafe menu and bar stations.',
-          timestamp: '2026-09-15 09:00:00',
-          severity: 'INFO'
-        }
-      ],
+      auditLogs: [],
       settings: businessSettings,
       roomTypes: [],
       resortRooms: [],
@@ -1086,26 +1091,14 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
       menuItems: dineMenuItems,
       tablesRooms: dineTables,
       orders: [],
-      inventoryItems: INITIAL_INVENTORY.slice(0, 5),
+      inventoryItems: CLEAN_INVENTORY.slice(0, 5),
       inventoryLogs: [],
-      customers: INITIAL_CUSTOMERS.slice(0, 3),
+      customers: [],
       khataTransactions: [],
       expenses: [],
       dayClosings: [],
       staffUsers: INITIAL_STAFF_USERS,
-      auditLogs: [
-        {
-          id: 'audit-phewa-init',
-          businessId: business.businessId,
-          staffId: 'staff-admin-sys',
-          staffName: 'Pooja Shrestha',
-          role: 'ADMIN',
-          action: 'BUSINESS_INITIALIZED',
-          details: 'Phewa Lakeside Fine Dine Restaurant initialized with lakeside deck tables and gourmet menu.',
-          timestamp: '2026-09-20 10:00:00',
-          severity: 'INFO'
-        }
-      ],
+      auditLogs: [],
       settings: businessSettings,
       roomTypes: [],
       resortRooms: [],
@@ -1120,16 +1113,16 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
   }
 
   // Default / Resort / Combined Starter Template:
-  // Includes ONLY structural starter catalog (menu, tables, raw inventory SKUs, room types, rooms, service catalog)
+  // Includes ONLY structural starter catalog (menu, clean tables, healthy stock SKUs, room types, available rooms, service catalog)
   // Zero fake financial balances, zero fake customers/Khata dues, zero fake reservations/folios/hotelPayments!
   const hasResort = business.enabledModules.includes('resort');
 
   return {
     businessId: business.businessId,
     menuItems: INITIAL_MENU_ITEMS,
-    tablesRooms: INITIAL_TABLES_ROOMS,
+    tablesRooms: CLEAN_TABLES_ROOMS,
     orders: [],
-    inventoryItems: INITIAL_INVENTORY,
+    inventoryItems: CLEAN_INVENTORY,
     inventoryLogs: [],
     customers: [],
     khataTransactions: [],
@@ -1152,7 +1145,7 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
     settings: businessSettings,
     accounts: createCleanChartOfAccounts(business.businessId),
     roomTypes: hasResort ? INITIAL_ROOM_TYPES : [],
-    resortRooms: hasResort ? INITIAL_RESORT_ROOMS : [],
+    resortRooms: hasResort ? CLEAN_RESORT_ROOMS : [],
     guestProfiles: [],
     reservations: [],
     guestFolioItems: [],

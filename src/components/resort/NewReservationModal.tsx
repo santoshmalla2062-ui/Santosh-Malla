@@ -67,6 +67,8 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
   const [checkOutDate, setCheckOutDate] = useState<string>(
     initialDate ? addDaysLocalYMD(initialDate, 1) : tomorrowStr
   );
+  const [checkInTime, setCheckInTime] = useState<string>(settings.hotelCheckInTime || '14:00');
+  const [checkOutTime, setCheckOutTime] = useState<string>(settings.hotelCheckOutTime || '12:00');
   const [immediateCheckIn, setImmediateCheckIn] = useState<boolean>(
     initialImmediateCheckIn && (!initialDate || initialDate === todayStr)
   );
@@ -206,12 +208,18 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
       guestName: guestName.trim(),
       guestPhone: guestPhone.trim(),
       guestEmail: guestEmail.trim() || undefined,
+      guestAddress: guestAddress.trim() || undefined,
+      guestCountry: guestCountry.trim() || 'Nepal',
+      idType,
+      idNumber: idNumber.trim() || undefined,
       roomId: room.id,
       roomNumber: room.roomNumber,
       roomTypeId: room.roomTypeId,
       roomTypeName: room.roomTypeName,
       checkInDate,
       checkOutDate,
+      checkInTime,
+      checkOutTime,
       adults,
       children,
       nightsCount,
@@ -289,63 +297,83 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
             <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[10px] text-slate-500">
               1. Stay Dates & Capacity
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Check-in Date:</label>
-                <input
-                  type="date"
-                  value={checkInDate}
-                  min={todayStr}
-                  onChange={(e) => {
-                    const nextCheckIn = e.target.value;
-                    setCheckInDate(nextCheckIn);
-                    if (nextCheckIn !== todayStr && immediateCheckIn) {
-                      setImmediateCheckIn(false);
-                    }
-                    if (checkOutDate <= nextCheckIn) {
-                      setCheckOutDate(addDaysLocalYMD(nextCheckIn, 1));
-                    }
-                  }}
-                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
-                  required
-                />
+                <label className="block text-slate-700 font-bold mb-1">Check-in Date &amp; Time:</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="date"
+                    value={checkInDate}
+                    min={todayStr}
+                    onChange={(e) => {
+                      const nextCheckIn = e.target.value;
+                      setCheckInDate(nextCheckIn);
+                      if (nextCheckIn !== todayStr && immediateCheckIn) {
+                        setImmediateCheckIn(false);
+                      }
+                      if (checkOutDate <= nextCheckIn) {
+                        setCheckOutDate(addDaysLocalYMD(nextCheckIn, 1));
+                      }
+                    }}
+                    className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
+                    required
+                  />
+                  <input
+                    type="time"
+                    value={checkInTime}
+                    onChange={(e) => setCheckInTime(e.target.value)}
+                    className="w-24 px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num text-[11px]"
+                    title="Expected / Standard Check-In Time"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Check-out Date:</label>
-                <input
-                  type="date"
-                  value={checkOutDate}
-                  min={checkInDate || todayStr}
-                  onChange={(e) => setCheckOutDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
-                  required
-                />
+                <label className="block text-slate-700 font-bold mb-1">Check-out Date &amp; Time:</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="date"
+                    value={checkOutDate}
+                    min={checkInDate || todayStr}
+                    onChange={(e) => setCheckOutDate(e.target.value)}
+                    className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
+                    required
+                  />
+                  <input
+                    type="time"
+                    value={checkOutTime}
+                    onChange={(e) => setCheckOutTime(e.target.value)}
+                    className="w-24 px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num text-[11px]"
+                    title="Expected / Standard Check-Out Time"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Adults:</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="12"
-                  value={adults}
-                  onChange={(e) => setAdults(Math.max(1, Number(e.target.value)))}
-                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
-                  required
-                />
-              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Adults:</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={adults}
+                    onChange={(e) => setAdults(Math.max(1, Number(e.target.value)))}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
+                    required
+                  />
+                </div>
 
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Children:</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="8"
-                  value={children}
-                  onChange={(e) => setChildren(Math.max(0, Number(e.target.value)))}
-                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
-                />
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Children:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="8"
+                    value={children}
+                    onChange={(e) => setChildren(Math.max(0, Number(e.target.value)))}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
+                  />
+                </div>
               </div>
             </div>
 
@@ -509,33 +537,33 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
               </div>
             </div>
 
-            {immediateCheckIn && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg">
-                <div>
-                  <label className="block text-emerald-950 font-bold mb-1">ID Document Type (Walk-In):</label>
-                  <select
-                    value={idType}
-                    onChange={(e) => setIdType(e.target.value as GuestProfile['idType'])}
-                    className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded-lg font-medium"
-                  >
-                    <option value="Citizenship">Citizenship (नागरिकता)</option>
-                    <option value="Passport">Passport (राहदानी)</option>
-                    <option value="Driving License">Driving License (सवारी अनुमति)</option>
-                    <option value="National ID">National ID (राष्ट्रिय परिचयपत्र)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-emerald-950 font-bold mb-1">ID / Passport Number:</label>
-                  <input
-                    type="text"
-                    value={idNumber}
-                    onChange={(e) => setIdNumber(e.target.value)}
-                    placeholder="e.g. 27-01-78-01923 or Passport #"
-                    className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded-lg font-medium font-mono-num"
-                  />
-                </div>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg border ${
+              immediateCheckIn ? 'bg-emerald-50/70 border-emerald-200' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div>
+                <label className="block text-slate-800 font-bold mb-1">ID Document Type:</label>
+                <select
+                  value={idType}
+                  onChange={(e) => setIdType(e.target.value as GuestProfile['idType'])}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium"
+                >
+                  <option value="Citizenship">Citizenship (नागरिकता)</option>
+                  <option value="Passport">Passport (राहदानी)</option>
+                  <option value="Driving License">Driving License (सवारी अनुमति)</option>
+                  <option value="National ID">National ID (राष्ट्रिय परिचयपत्र)</option>
+                </select>
               </div>
-            )}
+              <div>
+                <label className="block text-slate-800 font-bold mb-1">ID / Passport Number:</label>
+                <input
+                  type="text"
+                  value={idNumber}
+                  onChange={(e) => setIdNumber(e.target.value)}
+                  placeholder="e.g. 27-01-78-01923 or Passport #"
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-medium font-mono-num"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Pricing & Deposit */}

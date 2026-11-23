@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Session, StaffInvitation, StaffRole, StaffUser } from '../../types';
 import { hashPinWithSalt, isKnownWeakPin, saveSession, validateProductionPin } from '../../services/security';
-import { getVisibleDemoPinRoles } from '../../services/cloudSyncService';
+import { getVisibleDemoPinRoles, isMasterOwnerEmail } from '../../services/cloudSyncService';
 import { Language } from '../../utils/translations';
 import { PWAInstallButton } from '../common/PWAInstallButton';
 
@@ -111,9 +111,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   }, []);
 
   const rememberedEmail = useMemo(() => {
-    if (urlParams.email) return urlParams.email;
+    if (urlParams.email && !isMasterOwnerEmail(urlParams.email)) return urlParams.email;
     try {
-      return (localStorage.getItem('hb_remembered_login_email') || '').trim();
+      const stored = (localStorage.getItem('hb_remembered_login_email') || '').trim();
+      if (isMasterOwnerEmail(stored)) {
+        localStorage.removeItem('hb_remembered_login_email');
+        return '';
+      }
+      return stored;
     } catch {
       return '';
     }
@@ -612,14 +617,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </p>
             </div>
           </div>
-
-          {/* Connected Cloud Email Status Strip if already signed into Firebase */}
-          {cloudUserEmail && !pendingRotationStaff && (
-            <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate">{cloudUserEmail}</span>
-            </div>
-          )}
 
           {/* Clean Mode Switcher for Email Auth (Sign In vs First-Time Email Setup) */}
           {!pendingRotationStaff && (loginMode === 'email' || loginMode === 'signup') && onEmailPasswordSignUp && (

@@ -32,6 +32,8 @@ interface MobileAccessQRPanelProps {
   lang: Language;
   androidApkUrl?: string;
   onSaveAndroidApkUrl?: (apkUrl: string) => void;
+  publicAppUrl?: string;
+  onSavePublicAppUrl?: (appUrl: string) => void;
   onOpenDownloadPortal?: () => void;
   onOpenFullscreenModal?: () => void;
   compactHeader?: boolean;
@@ -42,6 +44,8 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
   lang,
   androidApkUrl = '',
   onSaveAndroidApkUrl,
+  publicAppUrl = '',
+  onSavePublicAppUrl,
   onOpenDownloadPortal,
   onOpenFullscreenModal,
   compactHeader = false
@@ -49,9 +53,12 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const isRunningOnDevOrigin = isLocalOrDevPreviewUrl(currentOrigin);
 
-  const [baseUrlInput, setBaseUrlInput] = useState<string>(() =>
-    resolveDefaultPublicAppUrl(currentOrigin)
+  const [baseUrlInput, setBaseUrlInput] = useState<string>(
+    () =>
+      sanitizePublicBaseUrl(publicAppUrl) ||
+      resolveDefaultPublicAppUrl(currentOrigin)
   );
+  const [savedPublicUrlFeedback, setSavedPublicUrlFeedback] = useState<boolean>(false);
   const [apkUrlInput, setApkUrlInput] = useState<string>(
     androidApkUrl || DEFAULT_ANDROID_APK_URL
   );
@@ -65,6 +72,13 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
   useEffect(() => {
     setApkUrlInput(androidApkUrl || DEFAULT_ANDROID_APK_URL);
   }, [androidApkUrl]);
+
+  useEffect(() => {
+    if (publicAppUrl) {
+      const sanitized = sanitizePublicBaseUrl(publicAppUrl);
+      if (sanitized) setBaseUrlInput(sanitized);
+    }
+  }, [publicAppUrl]);
 
   const cleanedBaseUrl = useMemo(() => sanitizePublicBaseUrl(baseUrlInput), [baseUrlInput]);
   const cleanedApkUrl = useMemo(() => sanitizeAndroidApkUrl(apkUrlInput), [apkUrlInput]);
@@ -161,6 +175,16 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
     }
     setSavedApkFeedback(true);
     setTimeout(() => setSavedApkFeedback(false), 2500);
+  };
+
+  const handleSavePublicUrl = () => {
+    const normalized = sanitizePublicBaseUrl(baseUrlInput) || SHARED_APP_URL;
+    setBaseUrlInput(normalized);
+    if (onSavePublicAppUrl) {
+      onSavePublicAppUrl(normalized);
+    }
+    setSavedPublicUrlFeedback(true);
+    setTimeout(() => setSavedPublicUrlFeedback(false), 2500);
   };
 
   const downloadFilename = `${(businessName || 'himalayan-breeze')
@@ -369,32 +393,49 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    {lang === 'ne' ? 'सार्वजनिक URL' : 'Published URL'}
+                    {lang === 'ne' ? 'सार्वजनिक URL (Live)' : 'GitHub Pages (Live)'}
                   </button>
-                  {currentOrigin && (
+                  {currentOrigin && !isRunningOnDevOrigin && (
                     <button
                       type="button"
-                      onClick={() => setBaseUrlInput(currentOrigin)}
+                      onClick={() => setBaseUrlInput(resolveDefaultPublicAppUrl(currentOrigin))}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap shrink-0 ${
-                        cleanedBaseUrl === sanitizePublicBaseUrl(currentOrigin)
+                        cleanedBaseUrl === sanitizePublicBaseUrl(resolveDefaultPublicAppUrl(currentOrigin))
                           ? 'bg-slate-900 text-white border-slate-900'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {lang === 'ne' ? 'हालको ब्राउजर' : 'Current URL'}
+                      {lang === 'ne' ? 'हालको डोमेन' : 'Current Domain'}
                     </button>
                   )}
                 </div>
               </div>
 
-              <input
-                id="qr-host-url-input"
-                type="url"
-                value={baseUrlInput}
-                onChange={(e) => setBaseUrlInput(e.target.value)}
-                placeholder="https://app.yourwebsite.com"
-                className="w-full min-h-[40px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-600"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  id="qr-host-url-input"
+                  type="url"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  placeholder="https://santoshmalla2062-ui.github.io/Santosh-Malla"
+                  className="flex-1 min-w-0 min-h-[40px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono tabular-nums text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-600"
+                />
+                {onSavePublicAppUrl && (
+                  <button
+                    type="button"
+                    onClick={handleSavePublicUrl}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    {savedPublicUrlFeedback
+                      ? lang === 'ne'
+                        ? 'सेभ भयो!'
+                        : 'Saved!'
+                      : lang === 'ne'
+                      ? 'लिंक सेभ'
+                      : 'Save Link'}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -441,17 +482,13 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
           </div>
 
           {/* Availability Notice for Shared vs Dev URLs */}
-          {(isSelectedUrlDev || (isSelectedUrlAiStudioShared && isRunningOnDevOrigin)) && (
+          {(isSelectedUrlDev || isSelectedUrlAiStudioShared) && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-2 text-xs text-amber-950 leading-relaxed">
               <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
               <span>
-                {isSelectedUrlDev
-                  ? lang === 'ne'
-                    ? 'यो टेस्टिङ / localhost लिंक भएकोले अरूको मोबाइलबाट नखुल्न सक्छ — बाहिरबाट खोल्न "सार्वजनिक URL" छान्नुहोस्।'
-                    : 'Localhost / dev preview links are not reachable from external phones. Switch to Published URL for mobile scanning.'
-                  : lang === 'ne'
-                  ? 'यो सार्वजनिक लिंक सबै मोबाइलमा खुल्न माथि दायाँपट्टि रहेको "Share App" एकपटक पब्लिस गरेको हुनुपर्छ।'
-                  : 'Make sure you have clicked "Share App" in the top-right once so the published link loads cleanly on mobile.'}
+                {lang === 'ne'
+                  ? 'यो प्रिभ्यू / localhost लिंक भएकोले अरूको मोबाइलबाट नखुल्न सक्छ — सधैँ चल्ने लिंकको लागि माथि "सार्वजनिक URL (Live)" छान्नुहोस्।'
+                  : 'Preview / localhost links may require developer login on external phones. Click "GitHub Pages (Live)" above for public mobile scanning.'}
               </span>
             </div>
           )}
@@ -506,6 +543,8 @@ interface MobileAccessQRModalProps {
   lang: Language;
   androidApkUrl?: string;
   onSaveAndroidApkUrl?: (apkUrl: string) => void;
+  publicAppUrl?: string;
+  onSavePublicAppUrl?: (appUrl: string) => void;
   onOpenDownloadPortal?: () => void;
 }
 
@@ -516,6 +555,8 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
   lang,
   androidApkUrl,
   onSaveAndroidApkUrl,
+  publicAppUrl,
+  onSavePublicAppUrl,
   onOpenDownloadPortal
 }) => {
   useEffect(() => {
@@ -583,6 +624,8 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
             lang={lang}
             androidApkUrl={androidApkUrl}
             onSaveAndroidApkUrl={onSaveAndroidApkUrl}
+            publicAppUrl={publicAppUrl}
+            onSavePublicAppUrl={onSavePublicAppUrl}
             compactHeader
             onOpenDownloadPortal={
               onOpenDownloadPortal

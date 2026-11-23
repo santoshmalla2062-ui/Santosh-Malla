@@ -833,6 +833,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg"
                     />
                   </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      {lang === 'ne' ? 'मानक चेक-इन समय (Hotel Check-In)' : 'Hotel Standard Check-In Time'}
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.hotelCheckInTime || '14:00'}
+                      onChange={(e) => setFormData({ ...formData, hotelCheckInTime: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      {lang === 'ne' ? 'मानक चेक-आउट समय (Hotel Check-Out)' : 'Hotel Standard Check-Out Time'}
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.hotelCheckOutTime || '12:00'}
+                      onChange={(e) => setFormData({ ...formData, hotelCheckOutTime: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1846,10 +1869,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 businessName={activeBusiness?.businessName || settings.businessName}
                 lang={lang}
                 androidApkUrl={settings.androidApkUrl}
+                publicAppUrl={settings.publicAppUrl}
                 onSaveAndroidApkUrl={(apkUrl) =>
                   onUpdateSettings({
                     ...settings,
                     androidApkUrl: apkUrl || undefined
+                  })
+                }
+                onSavePublicAppUrl={(publicUrl) =>
+                  onUpdateSettings({
+                    ...settings,
+                    publicAppUrl: publicUrl || undefined
                   })
                 }
                 onOpenDownloadPortal={onOpenDownloadPortal}
@@ -1914,7 +1944,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
                 </div>
 
-                {/* Reset Demo Data Button */}
+                {/* Clear Demo Data Button */}
                 <button
                   type="button"
                   disabled={!canModifyConfig}
@@ -1922,7 +1952,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-rose-50 disabled:opacity-40 text-rose-700 border border-slate-300 rounded-xl text-xs font-semibold transition-all shadow-2xs hover:border-rose-300"
                 >
                   <RotateCcw className="h-4 w-4 text-rose-600" />
-                  <span>{lang === 'ne' ? 'नमुना डेटा रिसेट' : 'Reset Sample Data'}</span>
+                  <span>{lang === 'ne' ? 'सबै डेमो डेटा हटाउनुहोस्' : 'Clear Demo Data (Clean Start)'}</span>
                 </button>
               </div>
             </div>
