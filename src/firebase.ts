@@ -4,6 +4,8 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
   sendPasswordResetEmail,
   sendEmailVerification,
   setPersistence,
@@ -162,6 +164,28 @@ export async function signInWithEmailPassword(
   return cred.user;
 }
 
+export async function registerWithEmailPassword(
+  email: string,
+  password: string,
+  rememberMe: boolean = true,
+  displayName?: string
+): Promise<User> {
+  await setPersistence(
+    auth,
+    rememberMe ? browserLocalPersistence : browserSessionPersistence
+  );
+  const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  if (displayName && displayName.trim()) {
+    try {
+      await updateProfile(cred.user, { displayName: displayName.trim().slice(0, 120) });
+    } catch {
+      // Best-effort profile update
+    }
+  }
+  await sendEmailVerification(cred.user);
+  return cred.user;
+}
+
 export async function sendPasswordReset(email: string): Promise<void> {
   await sendPasswordResetEmail(auth, email.trim());
 }
@@ -173,4 +197,5 @@ export async function sendUserEmailVerification(user: User): Promise<void> {
 export async function signOutFirebase(): Promise<void> {
   await signOut(auth);
 }
+
 

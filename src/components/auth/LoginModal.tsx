@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ShieldCheck,
   KeyRound,
@@ -11,9 +11,10 @@ import {
   EyeOff,
   Languages,
   ArrowLeft,
-  Mail
+  Mail,
+  Loader2
 } from 'lucide-react';
-import { Session, StaffRole, StaffUser } from '../../types';
+import { Session, StaffInvitation, StaffRole, StaffUser } from '../../types';
 import { hashPinWithSalt, isKnownWeakPin, saveSession, validateProductionPin } from '../../services/security';
 import { getVisibleDemoPinRoles } from '../../services/cloudSyncService';
 import { Language } from '../../utils/translations';
@@ -33,11 +34,19 @@ interface LoginModalProps {
   ownerControlLocked?: boolean;
   cloudUserEmail?: string | null;
   isGoogleAuthLoading?: boolean;
+  isCloudConnecting?: boolean;
   cloudAuthError?: string | null;
+  pendingInvitations?: StaffInvitation[];
   onGoogleSignIn?: () => Promise<void> | void;
   onEmailPasswordSignIn?: (
     email: string,
     password: string,
+    rememberMe: boolean
+  ) => Promise<{ success: boolean; error?: string; message?: string }>;
+  onEmailPasswordSignUp?: (
+    email: string,
+    password: string,
+    fullName: string,
     rememberMe: boolean
   ) => Promise<{ success: boolean; error?: string; message?: string }>;
   onSendPasswordReset?: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
@@ -52,6 +61,14 @@ interface LoginModalProps {
   onOpenMobileQR?: () => void;
 }
 
+const deriveUsernameFromInput = (nameOrEmail: string): string => {
+  const base = nameOrEmail.includes('@') ? nameOrEmail.split('@')[0] : nameOrEmail;
+  return base
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, '')
+    .slice(0, 24);
+};
+
 export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   staffUsers,
@@ -65,32 +82,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   ownerControlLocked = true,
   cloudUserEmail = null,
   isGoogleAuthLoading = false,
+  isCloudConnecting = false,
   cloudAuthError = null,
+  pendingInvitations = [],
   onGoogleSignIn,
   onEmailPasswordSignIn,
+  onEmailPasswordSignUp,
   onSendPasswordReset,
   onRotateStaffPin,
   onAcceptInviteCode,
   onOpenDownloadPortal,
   onOpenMobileQR
 }) => {
-  const initialInviteParam =
-    typeof window !== 'undefined'
-      ? (new URLSearchParams(window.location.search).get('invite') || '').trim().toUpperCase()
-      : '';
+  const urlParams = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { invite: '', email: '', name: '' };
+    }
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      return {
+        invite: (sp.get('invite') || '').trim().toUpperCase(),
+        email: (sp.get('email') || '').trim().toLowerCase(),
+        name: (sp.get('name') || '').trim()
+      };
+    } catch {
+      return { invite: '', email: '', name: '' };
+    }
+  }, []);
+
+  const rememberedEmail = useMemo(() => {
+    if (urlParams.email) return urlParams.email;
+    try {
+      return (localStorage.getItem('hb_remembered_login_email') || '').trim();
+    } catch {
+      return '';
+    }
+  }, [urlParams.email]);
+
   const activeStaffUsers = staffUsers.filter((s) => s.isActive !== false);
 
-  const [loginMode, setLoginMode] = useState<'email' | 'pin' | 'invite' | 'forgot'>(() =>
-    initialInviteParam ? 'invite' : 'email'
+  const [loginMode, setLoginMode] = useState<'email' | 'signup' | 'pin' | 'invite' | 'forgot'>(() =>
+    urlParams.invite ? 'invite' : 'email'
   );
 
   // Email / Password state
-  const [emailInput, setEmailInput] = useState('');
+  const [emailInput, setEmailInput] = useState(rememberedEmail);
   const [passwordInput, setPasswordInput] = useState('');
+  const [signupFullName, setSignupFullName] = useState(urlParams.name);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isEmailLoading, setIsEmailLoading] = useState(false);
-  const [resetEmailInput, setResetEmailInput] = useState('');
+  const [resetEmailInput, setResetEmailInput] = useState(rememberedEmail);
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [infoMsg, setInfoMsg] = useState('');
 
@@ -110,12 +152,38 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [rotationConfirmPin, setRotationConfirmPin] = useState('');
   const [isRotatingPin, setIsRotatingPin] = useState(false);
 
-  // Invite code activation state
-  const [inviteCodeInput, setInviteCodeInput] = useState(initialInviteParam);
-  const [inviteFullName, setInviteFullName] = useState('');
-  const [inviteUsername, setInviteUsername] = useState('');
+  // Invite code activation state (pre-filled from ?invite=&email=&name= deep link)
+  const initialInviteName =
+    urlParams.name || (urlParams.email ? urlParams.email.split('@')[0] : '');
+  const [inviteCodeInput, setInviteCodeInput] = useState(urlParams.invite);
+  const [inviteFullName, setInviteFullName] = useState(initialInviteName);
+  const [inviteUsername, setInviteUsername] = useState(() =>
+    initialInviteName ? deriveUsernameFromInput(initialInviteName) : ''
+  );
+  const [usernameManuallyEdited, setUsernameManuallyEdited] = useState(false);
   const [invitePin, setInvitePin] = useState('');
   const [isAcceptingInvite, setIsAcceptingInvite] = useState(false);
+
+  // Safe exact-code match (only evaluates when full code is entered — zero enumeration risk)
+  const matchedPendingInvite = useMemo(() => {
+    const cleanCode = inviteCodeInput.trim().toUpperCase();
+    if (cleanCode.length < 8) return undefined;
+    return pendingInvitations.find(
+      (inv) => inv.inviteCode.toUpperCase() === cleanCode && inv.status === 'PENDING'
+    );
+  }, [inviteCodeInput, pendingInvitations]);
+
+  useEffect(() => {
+    if (matchedPendingInvite) {
+      if (!inviteFullName && matchedPendingInvite.emailOrPhone.includes('@')) {
+        const suggested = matchedPendingInvite.emailOrPhone.split('@')[0];
+        setInviteFullName(suggested);
+        if (!usernameManuallyEdited) {
+          setInviteUsername(deriveUsernameFromInput(suggested));
+        }
+      }
+    }
+  }, [matchedPendingInvite, inviteFullName, usernameManuallyEdited]);
 
   if (!isOpen) return null;
 
@@ -140,7 +208,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     typeof navigator !== 'undefined' &&
     /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(navigator.userAgent || '');
 
-  const switchMode = (next: 'email' | 'pin' | 'invite' | 'forgot') => {
+  const switchMode = (next: 'email' | 'signup' | 'pin' | 'invite' | 'forgot') => {
     setLoginMode(next);
     setErrorMsg('');
     setInfoMsg('');
@@ -194,6 +262,50 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Sign in failed. Please try again.');
+    } finally {
+      setIsEmailLoading(false);
+    }
+  };
+
+  const handleEmailSignupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = emailInput.trim();
+    const cleanName = signupFullName.trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMsg(
+        lang === 'ne' ? 'कृपया सही Email ID राख्नुहोस्।' : 'Please enter a valid Email ID.'
+      );
+      return;
+    }
+    if (passwordInput.length < 6) {
+      setErrorMsg(
+        lang === 'ne'
+          ? 'पासवर्ड कम्तीमा ६ अक्षरको राख्नुहोस्।'
+          : 'Password must be at least 6 characters.'
+      );
+      return;
+    }
+    if (!onEmailPasswordSignUp) return;
+
+    setIsEmailLoading(true);
+    setErrorMsg('');
+    setInfoMsg('');
+    try {
+      const res = await onEmailPasswordSignUp(cleanEmail, passwordInput, cleanName, rememberMe);
+      if (res.success) {
+        setInfoMsg(
+          res.message ||
+            (lang === 'ne'
+              ? 'खाता बन्यो! इनबक्सको लिंक क्लिक गरी Sign In बाट लग-इन गर्नुहोस्।'
+              : 'Account created! Verify the link in your inbox, then sign in.')
+        );
+        setPasswordInput('');
+        setLoginMode('email');
+      } else if (res.error) {
+        setErrorMsg(res.error);
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Could not create email login.');
     } finally {
       setIsEmailLoading(false);
     }
@@ -293,7 +405,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setPin('');
         setStaffIdentifier('');
       } else {
-        setErrorMsg(lang === 'ne' ? 'गलत PIN कोड! कृपया पुनः प्रयास गर्नुहोस्।' : 'Incorrect PIN. Please try again.');
+        setErrorMsg(
+          lang === 'ne' ? 'गलत PIN कोड! कृपया पुनः प्रयास गर्नुहोस्।' : 'Incorrect PIN. Please try again.'
+        );
         setPin('');
       }
     } catch {
@@ -311,7 +425,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setErrorMsg(lang === 'ne' ? 'दुवै नयाँ PIN कोड मिलेनन्।' : 'Confirmation PIN does not match.');
       return;
     }
-    const check = await validateProductionPin(trimmed, staffUsers, { excludeStaffId: pendingRotationStaff.id });
+    const check = await validateProductionPin(trimmed, staffUsers, {
+      excludeStaffId: pendingRotationStaff.id
+    });
     if (!check.isValid) {
       setErrorMsg(check.error || 'Weak or duplicate PIN rejected.');
       return;
@@ -319,7 +435,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setIsRotatingPin(true);
     setErrorMsg('');
     try {
-      const updatedUser = (await onRotateStaffPin(pendingRotationStaff.id, trimmed)) || pendingRotationStaff;
+      const updatedUser =
+        (await onRotateStaffPin(pendingRotationStaff.id, trimmed)) || pendingRotationStaff;
       const session = saveSession(updatedUser, 120);
       setPendingRotationStaff(null);
       setRotationNewPin('');
@@ -337,8 +454,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     e.preventDefault();
     if (!onAcceptInviteCode) return;
     const code = inviteCodeInput.trim().toUpperCase();
-    const uname = inviteUsername.trim();
     const fname = inviteFullName.trim();
+    const uname = (inviteUsername.trim() || deriveUsernameFromInput(fname)).trim();
     const p = invitePin.trim();
     if (!code || !uname || !fname || p.length < 4) {
       setErrorMsg(
@@ -396,10 +513,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   const displayError = errorMsg || cloudAuthError;
+  const emailBusy = isEmailLoading || isCloudConnecting;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/95 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-[420px] my-auto flex flex-col items-center">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-100/95 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-150">
+      <div className="w-full max-w-[430px] my-auto flex flex-col items-center">
         {/* Main Centered Dine Track Style Card */}
         <div className="relative w-full bg-white rounded-3xl shadow-xl border border-slate-200/80 px-6 sm:px-8 pt-8 pb-6 space-y-5">
           {/* Optional Close Button when switching accounts */}
@@ -408,7 +526,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close login modal"
-              className="absolute right-4 top-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+              className="absolute right-4 top-4 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
             >
               <X className="h-5 w-5" />
             </button>
@@ -421,12 +539,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <img
                   src={businessLogoUrl}
                   alt={businessName}
+                  referrerPolicy="no-referrer"
                   className="h-full w-full rounded-full object-cover bg-white"
                 />
               </div>
             ) : (
               <div className="h-16 w-16 rounded-full bg-orange-500 text-white shadow-md shadow-orange-500/25 flex items-center justify-center">
-                {/* Circular plate + crossed fork & spoon emblem matching reference */}
                 <svg
                   viewBox="0 0 64 64"
                   className="h-11 w-11"
@@ -436,28 +554,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 >
                   <circle cx="32" cy="32" r="24" stroke="white" strokeWidth="2.2" strokeOpacity="0.95" />
                   <circle cx="32" cy="32" r="19" stroke="white" strokeWidth="1.2" strokeOpacity="0.55" />
-                  {/* Spoon bottom-left to center */}
-                  <path
-                    d="M21 43L31.5 32.5"
-                    stroke="white"
-                    strokeWidth="2.8"
-                    strokeLinecap="round"
-                  />
-                  <ellipse
-                    cx="20"
-                    cy="44"
-                    rx="3.4"
-                    ry="4.6"
-                    transform="rotate(45 20 44)"
-                    fill="white"
-                  />
-                  {/* Fork center to top-right */}
-                  <path
-                    d="M32 32L41 21"
-                    stroke="white"
-                    strokeWidth="2.8"
-                    strokeLinecap="round"
-                  />
+                  <path d="M21 43L31.5 32.5" stroke="white" strokeWidth="2.8" strokeLinecap="round" />
+                  <ellipse cx="20" cy="44" rx="3.4" ry="4.6" transform="rotate(45 20 44)" fill="white" />
+                  <path d="M32 32L41 21" stroke="white" strokeWidth="2.8" strokeLinecap="round" />
                   <path
                     d="M38.5 18.5L43.5 23.5M40.5 16.5L44.5 20.5M42.5 18.5L46 15"
                     stroke="white"
@@ -468,7 +567,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             )}
 
-            <div className="space-y-1">
+            <div className="space-y-1 max-w-xs">
               <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
                 {pendingRotationStaff
                   ? lang === 'ne'
@@ -480,10 +579,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     : 'Reset Password'
                   : loginMode === 'invite'
                   ? lang === 'ne'
-                    ? 'निमन्त्रणा कोड सक्रिय गर्नुहोस्'
-                    : 'Activate Staff Invite'
+                    ? 'निमन्त्रणा स्वीकार गर्नुहोस्'
+                    : 'Join with Invite'
+                  : loginMode === 'signup'
+                  ? lang === 'ne'
+                    ? `${businessName} खाता सेटअप`
+                    : `Activate Email Login`
                   : lang === 'ne'
-                  ? `${businessName} मा लग-इन गर्नुहोस्`
+                  ? `${businessName} मा लग-इन`
                   : `Log In to ${businessName}`}
               </h2>
               <p className="text-sm text-slate-500 leading-snug">
@@ -497,8 +600,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     : 'Enter your registered email to receive a reset link.'
                   : loginMode === 'invite'
                   ? lang === 'ne'
-                    ? 'Admin वा Manager ले दिएको कोड प्रयोग गर्नुहोस्।'
-                    : 'Enter the invite code assigned by your Admin or Manager.'
+                    ? 'आफ्नो PIN सेट गरेर तुरुन्त ड्यासबोर्ड खोल्नुहोस्।'
+                    : 'Set your quick POS PIN to activate your role immediately.'
+                  : loginMode === 'signup'
+                  ? lang === 'ne'
+                    ? 'Admin/Manager ले अनुमति दिएको इमेलमा पासवर्ड बनाउनुहोस्।'
+                    : 'Create a password for your Admin/Manager-invited email.'
                   : lang === 'ne'
                   ? 'फेरि स्वागत छ। सेवा सुरु गर्न साइन इन गर्नुहोस्।'
                   : 'Welcome back. Sign in to pick up the service.'}
@@ -506,11 +613,39 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           </div>
 
-          {/* Connected Cloud Email Pill if already signed into Firebase */}
+          {/* Connected Cloud Email Status Strip if already signed into Firebase */}
           {cloudUserEmail && !pendingRotationStaff && (
-            <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+            <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
               <span className="truncate">{cloudUserEmail}</span>
+            </div>
+          )}
+
+          {/* Clean Mode Switcher for Email Auth (Sign In vs First-Time Email Setup) */}
+          {!pendingRotationStaff && (loginMode === 'email' || loginMode === 'signup') && onEmailPasswordSignUp && (
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => switchMode('email')}
+                className={`min-h-[40px] px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap ${
+                  loginMode === 'email'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {lang === 'ne' ? 'साइन इन (Sign In)' : 'Sign In'}
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode('signup')}
+                className={`min-h-[40px] px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap ${
+                  loginMode === 'signup'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {lang === 'ne' ? 'नयाँ इमेल सेटअप' : 'First-Time Email'}
+              </button>
             </div>
           )}
 
@@ -538,7 +673,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setErrorMsg('');
                   }}
                   placeholder="••••••"
-                  className="w-full px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
+                  className="w-full min-h-[46px] px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
                 />
               </div>
 
@@ -557,7 +692,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setErrorMsg('');
                   }}
                   placeholder="••••••"
-                  className="w-full px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
+                  className="w-full min-h-[46px] px-4 py-3 border-2 border-slate-200 focus:border-orange-500 focus:outline-none rounded-2xl font-mono text-center tracking-widest text-base"
                 />
               </div>
 
@@ -575,14 +710,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setPendingRotationStaff(null);
                     setErrorMsg('');
                   }}
-                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-semibold text-sm transition-colors"
+                  className="min-h-[44px] px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full font-semibold text-sm transition-colors"
                 >
                   {lang === 'ne' ? 'पछाडि' : 'Back'}
                 </button>
                 <button
                   type="submit"
                   disabled={rotationNewPin.length < 4 || isRotatingPin}
-                  className="flex-1 py-3 px-5 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-sm transition-colors"
+                  className="flex-1 min-h-[44px] py-2.5 px-5 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-sm transition-colors"
                 >
                   {isRotatingPin
                     ? lang === 'ne' ? 'सुरक्षित गर्दै...' : 'Saving...'
@@ -591,7 +726,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             </form>
           ) : loginMode === 'email' ? (
-            /* PRIMARY VIEW — Matches Dine Track Reference Screenshot */
+            /* PRIMARY VIEW — Fast Email & Google Login */
             <form onSubmit={handleEmailLoginSubmit} className="space-y-4">
               <div>
                 <label
@@ -604,6 +739,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   id="login-email-id"
                   type="email"
                   autoComplete="email"
+                  autoFocus={!emailInput}
                   value={emailInput}
                   onChange={(e) => {
                     setEmailInput(e.target.value);
@@ -611,7 +747,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setInfoMsg('');
                   }}
                   placeholder="you@restaurant.com"
-                  className="w-full px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                  className="w-full min-h-[46px] px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
                 />
               </div>
 
@@ -627,6 +763,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
+                    autoFocus={Boolean(emailInput)}
                     value={passwordInput}
                     onChange={(e) => {
                       setPasswordInput(e.target.value);
@@ -634,13 +771,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setInfoMsg('');
                     }}
                     placeholder={lang === 'ne' ? 'आफ्नो पासवर्ड राख्नुहोस्' : 'Enter your password'}
-                    className="w-full pl-4 pr-12 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
+                    className="w-full min-h-[46px] pl-4 pr-12 py-3 text-sm text-slate-900 placeholder:text-slate-400 bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 focus:outline-none transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
                     aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 h-10 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-xl transition-colors"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 rounded-xl transition-colors"
                   >
                     {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
                   </button>
@@ -649,7 +786,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
               {/* Remember Me + Forgot Password Row */}
               <div className="flex items-center justify-between text-sm pt-0.5">
-                <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                <label className="inline-flex items-center gap-2.5 cursor-pointer select-none min-h-[36px]">
                   <input
                     type="checkbox"
                     checked={rememberMe}
@@ -664,7 +801,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <button
                   type="button"
                   onClick={() => switchMode('forgot')}
-                  className="text-orange-500 hover:text-orange-600 font-semibold transition-colors"
+                  className="min-h-[36px] text-orange-500 hover:text-orange-600 font-semibold transition-colors whitespace-nowrap"
                 >
                   {lang === 'ne' ? 'पासवर्ड बिर्सनुभयो?' : 'Forgot Password?'}
                 </button>
@@ -699,11 +836,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               {/* Primary Orange Log In Button */}
               <button
                 type="submit"
-                disabled={isEmailLoading}
-                className="w-full h-12 bg-orange-500 hover:bg-orange-600 active:scale-[0.99] disabled:opacity-50 text-white rounded-full font-semibold text-base shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+                disabled={emailBusy}
+                className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-600 active:scale-[0.99] disabled:opacity-60 text-white rounded-full font-semibold text-base shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
               >
+                {emailBusy && <Loader2 className="h-4 w-4 animate-spin" />}
                 <span>
-                  {isEmailLoading
+                  {isCloudConnecting
+                    ? lang === 'ne' ? 'कार्यस्थल खुल्दैछ...' : 'Opening Workspace...'
+                    : isEmailLoading
                     ? lang === 'ne' ? 'लग-इन हुँदैछ...' : 'Logging in...'
                     : lang === 'ne' ? 'लग-इन गर्नुहोस्' : 'Log in'}
                 </span>
@@ -722,11 +862,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
                   <button
                     type="button"
-                    disabled={isGoogleAuthLoading}
+                    disabled={isGoogleAuthLoading || isCloudConnecting}
                     onClick={() => onGoogleSignIn()}
-                    className="w-full h-11 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-full font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-50"
+                    className="w-full min-h-[44px] bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-full font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 disabled:opacity-50"
                   >
-                    <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0" aria-hidden="true">
                       <path
                         fill="#4285F4"
                         d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
@@ -745,16 +885,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       />
                     </svg>
                     <span>
-                      {isGoogleAuthLoading
-                        ? lang === 'ne' ? 'Google प्रमाणित गर्दै...' : 'Connecting Google...'
-                        : lang === 'ne' ? 'Google बाट लग-इन गर्नुहोस्' : 'Continue with Google'}
+                      {isGoogleAuthLoading || isCloudConnecting
+                        ? lang === 'ne' ? 'Google जोडिँदैछ...' : 'Connecting Google...'
+                        : lang === 'ne' ? 'Google बाट १-क्लिक लग-इन' : 'Continue with Google'}
                     </span>
                   </button>
                 </>
               )}
 
-              {/* Floor Staff PIN Switcher Footer */}
-              <div className="pt-3 border-t border-slate-100 text-center space-y-1.5">
+              {/* Floor Staff PIN & Invite Switcher Footer */}
+              <div className="pt-3 border-t border-slate-100 text-center space-y-2">
                 <p className="text-sm text-slate-600 leading-relaxed">
                   {lang === 'ne' ? 'फ्लोरमा अर्डर लिँदै हुनुहुन्छ? ' : 'Taking orders on the floor? '}
                   <button
@@ -770,13 +910,94 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <button
                       type="button"
                       onClick={() => switchMode('invite')}
-                      className="text-xs font-medium text-slate-500 hover:text-orange-600 underline transition-colors"
+                      className="min-h-[36px] text-xs font-semibold text-slate-600 hover:text-orange-600 underline transition-colors"
                     >
                       {lang === 'ne' ? 'Invite Code छ? यहाँ सक्रिय गर्नुहोस्' : 'Have an Invite Code? Activate here'}
                     </button>
                   </div>
                 )}
               </div>
+            </form>
+          ) : loginMode === 'signup' ? (
+            /* FIRST-TIME INVITED EMAIL PASSWORD SETUP */
+            <form onSubmit={handleEmailSignupSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1">
+                  {lang === 'ne' ? 'तपाईंको पूरा नाम' : 'Full Name'}
+                </label>
+                <input
+                  type="text"
+                  value={signupFullName}
+                  onChange={(e) => setSignupFullName(e.target.value)}
+                  placeholder={lang === 'ne' ? 'उदा. सीता गुरुङ' : 'e.g. Sita Gurung'}
+                  className="w-full min-h-[44px] px-4 py-2.5 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1">
+                  {lang === 'ne' ? 'निमन्त्रित इमेल (Invited Email) *' : 'Invited Email ID *'}
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={emailInput}
+                  onChange={(e) => {
+                    setEmailInput(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  placeholder="staff@restaurant.com"
+                  className="w-full min-h-[44px] px-4 py-2.5 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-800 mb-1">
+                  {lang === 'ne' ? 'नयाँ पासवर्ड राख्नुहोस् (६+ अक्षर) *' : 'Create Password (6+ chars) *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={passwordInput}
+                    onChange={(e) => {
+                      setPasswordInput(e.target.value);
+                      setErrorMsg('');
+                    }}
+                    placeholder={lang === 'ne' ? 'कम्तीमा ६ अक्षर' : 'At least 6 characters'}
+                    className="w-full min-h-[44px] pl-4 pr-12 py-2.5 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700"
+                  >
+                    {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {displayError && (
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-3 rounded-2xl border border-rose-200">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isEmailLoading}
+                className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+              >
+                {isEmailLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                <span>
+                  {isEmailLoading
+                    ? lang === 'ne' ? 'खाता बन्दैछ...' : 'Creating Login...'
+                    : lang === 'ne' ? 'इमेल पासवर्ड सेट गरी पठाउनुहोस्' : 'Set Password & Verify Email'}
+                </span>
+              </button>
             </form>
           ) : loginMode === 'forgot' ? (
             /* FORGOT PASSWORD VIEW */
@@ -797,7 +1018,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setInfoMsg('');
                     }}
                     placeholder="you@restaurant.com"
-                    className="w-full pl-10 pr-4 py-3 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                    className="w-full min-h-[46px] pl-10 pr-4 py-3 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -805,7 +1026,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <p className="text-xs text-slate-500 leading-relaxed">
                 {lang === 'ne'
                   ? 'नोट: यदि तपाईं PIN-मात्र प्रयोग गर्ने स्टाफ हुनुहुन्छ भने Admin वा Manager बाट नयाँ PIN रिसेट गराउनुहोस्।'
-                  : 'Note: If you sign in with a Staff PIN only, ask your Admin or Manager to reset your PIN from the Staff Roster.'}
+                  : 'Note: Staff who sign in with a PIN only can ask their Admin or Manager to reset their PIN.'}
               </p>
 
               {displayError && (
@@ -825,7 +1046,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="submit"
                 disabled={isSendingReset}
-                className="w-full h-12 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all"
+                className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all"
               >
                 {isSendingReset
                   ? lang === 'ne' ? 'लिंक पठाउँदै...' : 'Sending reset link...'
@@ -836,7 +1057,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <button
                   type="button"
                   onClick={() => switchMode('email')}
-                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-orange-500 hover:text-orange-600"
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-orange-500 hover:text-orange-600 min-h-[40px]"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   <span>{lang === 'ne' ? 'Email लग-इनमा फर्कनुहोस्' : 'Back to Email Login'}</span>
@@ -844,13 +1065,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             </form>
           ) : loginMode === 'invite' && onAcceptInviteCode ? (
-            /* INVITE CODE ACTIVATION VIEW */
+            /* FAST INVITE CODE ACTIVATION VIEW */
             <form onSubmit={handleSubmitInviteCode} className="space-y-3.5">
-              <div className="p-3 bg-orange-50 border border-orange-200 rounded-2xl text-xs text-orange-950 leading-relaxed">
-                {lang === 'ne'
-                  ? 'Admin वा Manager ले दिएको निमन्त्रणा कोड (INV-XXXXXX) राख्नुहोस् — तपाईंको तोकिएको Role अनुसार सिधै ड्यासबोर्ड खुल्नेछ।'
-                  : 'Enter your Admin/Manager-issued Invitation Code (INV-XXXXXX) to activate your assigned role.'}
-              </div>
+              {matchedPendingInvite ? (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {lang === 'ne'
+                      ? `कोड मान्य छ · भूमिका: ${matchedPendingInvite.role} (${businessName})`
+                      : `Invite verified · Assigned Role: ${matchedPendingInvite.role}`}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl p-3 leading-relaxed">
+                  {lang === 'ne'
+                    ? 'Admin वा Manager ले दिएको कोड (INV-XXXXXX) र आफ्नो ४–८ अंकको PIN राखी तुरुन्त खाता खोल्नुहोस्।'
+                    : 'Enter the code from your Admin or Manager (INV-XXXXXX) and set a PIN to open your dashboard immediately.'}
+                </p>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -865,25 +1097,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     setErrorMsg('');
                   }}
                   placeholder="INV-XXXXXX"
-                  className="w-full px-3.5 py-2.5 text-xs font-mono font-bold tracking-wider bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                  className="w-full min-h-[44px] px-3.5 py-2.5 text-sm font-mono font-bold tracking-wider bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {lang === 'ne' ? 'पूरा नाम *' : 'Full Name *'}
+                    {lang === 'ne' ? 'तपाईंको पूरा नाम *' : 'Full Name *'}
                   </label>
                   <input
                     type="text"
                     required
                     value={inviteFullName}
                     onChange={(e) => {
-                      setInviteFullName(e.target.value);
+                      const val = e.target.value;
+                      setInviteFullName(val);
+                      if (!usernameManuallyEdited) {
+                        setInviteUsername(deriveUsernameFromInput(val));
+                      }
                       setErrorMsg('');
                     }}
-                    placeholder="Sita Gurung"
-                    className="w-full px-3 py-2 text-xs bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                    placeholder={lang === 'ne' ? 'सीता गुरुङ' : 'Sita Gurung'}
+                    className="w-full min-h-[44px] px-3.5 py-2 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -895,36 +1131,40 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     required
                     value={inviteUsername}
                     onChange={(e) => {
+                      setUsernameManuallyEdited(true);
                       setInviteUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''));
                       setErrorMsg('');
                     }}
                     placeholder="sita"
-                    className="w-full px-3 py-2 text-xs bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                    className="w-full min-h-[44px] px-3.5 py-2 text-sm font-mono bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  {lang === 'ne' ? 'आफ्नो सुरक्षा PIN सेट गर्नुहोस् (४–८ अंक) *' : 'Create Security PIN (4–8 digits) *'}
+                  {lang === 'ne'
+                    ? 'आफ्नो सुरक्षा PIN सेट गर्नुहोस् (४–८ अंक) *'
+                    : 'Set Quick POS PIN (4–8 digits) *'}
                 </label>
                 <input
                   type="password"
                   inputMode="numeric"
                   maxLength={8}
                   required
+                  autoFocus={Boolean(urlParams.invite && inviteFullName)}
                   value={invitePin}
                   onChange={(e) => {
                     setInvitePin(e.target.value.replace(/\D/g, ''));
                     setErrorMsg('');
                   }}
                   placeholder="••••••"
-                  className="w-full px-3 py-2.5 text-sm font-mono text-center tracking-widest bg-white border-2 border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                  className="w-full min-h-[46px] px-3.5 py-2.5 text-base font-mono text-center tracking-widest bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                 />
               </div>
 
               {displayError && (
-                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                <div className="flex items-start gap-2 text-xs font-semibold text-rose-700 bg-rose-50 p-2.5 rounded-2xl border border-rose-200">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>{displayError}</span>
                 </div>
@@ -933,29 +1173,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="submit"
                 disabled={isAcceptingInvite}
-                className="w-full h-11 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-sm flex items-center justify-center gap-2 transition-colors"
+                className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 transition-colors"
               >
                 <UserPlus className="h-4 w-4" />
                 <span>
                   {isAcceptingInvite
                     ? lang === 'ne' ? 'सक्रिय गर्दै...' : 'Activating...'
-                    : lang === 'ne' ? 'Invite स्वीकार गरी खोल्नुहोस्' : 'Accept Invite & Continue'}
+                    : lang === 'ne' ? 'सक्रिय गरी भित्र जानुहोस्' : 'Activate & Open Workspace'}
                 </span>
               </button>
 
-              <div className="pt-1 text-center">
+              <div className="pt-1 text-center space-y-1">
                 <button
                   type="button"
                   onClick={() => switchMode('email')}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-orange-500 hover:text-orange-600"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-orange-500 hover:text-orange-600 min-h-[36px]"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
-                  <span>{lang === 'ne' ? 'Email लग-इनमा फर्कनुहोस्' : 'Back to Email & Password Login'}</span>
+                  <span>
+                    {lang === 'ne'
+                      ? 'Email / Google बाट लग-इन गर्न फर्कनुहोस्'
+                      : 'Sign in with Email or Google instead'}
+                  </span>
                 </button>
               </div>
             </form>
           ) : (
-            /* STAFF PIN KEYPAD VIEW — Triggered by "Log in with your staff PIN" */
+            /* STAFF PIN KEYPAD VIEW */
             <form onSubmit={handlePinSubmit} className="space-y-3.5">
               {ownerControlLocked ? (
                 <div>
@@ -973,7 +1217,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       setErrorMsg('');
                     }}
                     placeholder={lang === 'ne' ? 'उदा. waiter, cashier, ram...' : 'e.g. waiter, cashier, ram...'}
-                    className="w-full px-3.5 py-2.5 text-sm font-medium bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
+                    className="w-full min-h-[46px] px-3.5 py-2.5 text-sm font-medium bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
                   />
                 </div>
               ) : (
@@ -995,7 +1239,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                             setPin('');
                             setErrorMsg('');
                           }}
-                          className={`p-2 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                          className={`min-h-[44px] p-2 rounded-xl border text-left transition-all flex flex-col justify-between ${
                             isDisabled
                               ? 'opacity-45 bg-slate-100 border-slate-200 cursor-not-allowed'
                               : isSelected
@@ -1007,7 +1251,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                             {user.name}
                           </span>
                           <div className="flex items-center justify-between mt-1">
-                            <span className={`inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${roleColorMap[user.role]}`}>
+                            <span
+                              className={`inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${roleColorMap[user.role]}`}
+                            >
                               {user.role}
                             </span>
                             {isDisabled && <span className="text-[9px] font-bold text-rose-600">Disabled</span>}
@@ -1019,16 +1265,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
               )}
 
-              {/* PIN Dots */}
+              {/* PIN Dots & Keypad */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700">
                     {lang === 'ne' ? 'सुरक्षा PIN कोड:' : 'Staff PIN:'}
                   </label>
                   {selectedStaff && !ownerControlLocked && (
-                    <span className="text-[10px] text-orange-800 font-bold bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
-                      {selectedStaff.role}
-                    </span>
+                    <span className="text-xs text-orange-700 font-bold">{selectedStaff.role}</span>
                   )}
                 </div>
 
@@ -1054,7 +1298,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   </div>
                 )}
 
-                {/* Keypad */}
                 <div className="grid grid-cols-3 gap-1.5 pt-0.5">
                   {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
                     <button
@@ -1065,7 +1308,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                         else if (k === '⌫') handleBackspace();
                         else handleKeypadPress(k);
                       }}
-                      className={`py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
+                      className={`min-h-[44px] py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 ${
                         k === 'C'
                           ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
                           : k === '⌫'
@@ -1101,7 +1344,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                               key={demo.role}
                               type="button"
                               onClick={() => {
-                                const found = staffUsers.find((s) => s.role === demo.role && s.isActive !== false);
+                                const found = staffUsers.find(
+                                  (s) => s.role === demo.role && s.isActive !== false
+                                );
                                 if (found) setSelectedStaffId(found.id);
                                 setPin(demo.pin);
                                 setErrorMsg('');
@@ -1122,7 +1367,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="submit"
                 disabled={pin.length < 4 || isVerifying}
-                className="w-full h-11 bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+                className="w-full min-h-[46px] bg-orange-500 hover:bg-orange-600 disabled:opacity-45 text-white rounded-full font-semibold text-sm shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
               >
                 <ShieldCheck className="h-4 w-4" />
                 <span>
@@ -1136,7 +1381,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <button
                   type="button"
                   onClick={() => switchMode('email')}
-                  className="inline-flex items-center gap-1 font-semibold text-orange-500 hover:text-orange-600"
+                  className="inline-flex items-center gap-1 font-semibold text-orange-500 hover:text-orange-600 min-h-[36px] whitespace-nowrap"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   <span>{lang === 'ne' ? 'Email लग-इन' : 'Back to Email Login'}</span>
@@ -1145,7 +1390,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   <button
                     type="button"
                     onClick={() => switchMode('invite')}
-                    className="font-semibold text-slate-600 hover:text-orange-600 underline"
+                    className="font-semibold text-slate-600 hover:text-orange-600 underline min-h-[36px] whitespace-nowrap"
                   >
                     {lang === 'ne' ? 'Invite Code?' : 'Have Invite Code?'}
                   </button>
@@ -1154,14 +1399,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </form>
           )}
 
-          {/* Bottom Language Switcher Pill — Matches Dine Track Reference */}
+          {/* Bottom Language Switcher */}
           <div className="pt-2 flex items-center justify-center gap-2.5">
             <Languages className="h-4 w-4 text-slate-400" aria-hidden="true" />
             <div className="inline-flex items-center p-1 rounded-xl border border-slate-200 bg-slate-50">
               <button
                 type="button"
                 onClick={() => onLanguageChange?.('en')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`min-h-[34px] px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                   lang === 'en'
                     ? 'bg-orange-500 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1172,7 +1417,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={() => onLanguageChange?.('ne')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`min-h-[34px] px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                   lang === 'ne'
                     ? 'bg-orange-500 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1184,7 +1429,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
         </div>
 
-        {/* Quiet App Utility Bar Underneath Card */}
+        {/* Utility Bar Underneath Card */}
         {(onOpenMobileQR || onOpenDownloadPortal) && (
           <div className="mt-4 flex items-center justify-center gap-3 flex-wrap text-xs text-slate-500">
             <PWAInstallButton lang={lang} compact />
@@ -1192,7 +1437,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={onOpenMobileQR}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-orange-300 hover:text-orange-600 font-semibold shadow-2xs transition-colors"
+                className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-orange-300 hover:text-orange-600 font-semibold shadow-2xs transition-colors whitespace-nowrap"
               >
                 <QrCode className="h-3.5 w-3.5 text-orange-500" />
                 <span>{lang === 'ne' ? 'मोबाइल QR' : 'Mobile QR'}</span>
@@ -1202,7 +1447,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <button
                 type="button"
                 onClick={onOpenDownloadPortal}
-                className="font-semibold text-slate-600 hover:text-orange-600 underline transition-colors"
+                className="min-h-[38px] px-2 font-semibold text-slate-600 hover:text-orange-600 underline transition-colors whitespace-nowrap"
               >
                 {lang === 'ne' ? 'डाउनलोड पेज' : 'Download Page'}
               </button>

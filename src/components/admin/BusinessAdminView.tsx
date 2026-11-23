@@ -51,6 +51,7 @@ import {
 } from 'lucide-react';
 import {
   buildAppDownloadUrl,
+  buildStaffInviteUrl,
   resolveDefaultPublicAppUrl
 } from '../../utils/distribution';
 import {
@@ -76,7 +77,12 @@ import {
   NotificationSettings,
   SecuritySettings
 } from '../../types';
-import { ALL_APP_MODULES, DEFAULT_PAYMENT_METHODS, DEFAULT_RECEIPT_SETTINGS } from '../../services/tenantStorage';
+import {
+  ALL_APP_MODULES,
+  DEFAULT_PAYMENT_METHODS,
+  DEFAULT_RECEIPT_SETTINGS,
+  revokeStaffInvitation
+} from '../../services/tenantStorage';
 import {
   canActorAssignRole,
   canActorManageStaff,
@@ -859,44 +865,76 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     }
   };
 
-  const buildStaffInviteShareText = (staffName: string, email: string, role: StaffRole): string => {
+  const buildStaffInviteShareText = (
+    staffName: string,
+    email: string,
+    role: StaffRole,
+    inviteCode?: string
+  ): string => {
     const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-    const appInstallUrl = buildAppDownloadUrl(resolveDefaultPublicAppUrl(publicOrigin), business.businessId);
+    const directJoinUrl = buildStaffInviteUrl({
+      baseUrl: resolveDefaultPublicAppUrl(publicOrigin),
+      businessId: business.businessId,
+      inviteCode,
+      email: email.includes('@') ? email : undefined,
+      name: staffName || undefined
+    });
     if (lang === 'ne') {
-      return `नमस्ते ${staffName || email},\n"${business.businessName}" POS एपमा तपाईंलाई ${role} भूमिका दिइएको छ।\n\n१) यो लिंक Chrome/Safari मा खोलेर मोबाइलमा एप Install गर्नुहोस्:\n${appInstallUrl}\n\n२) एप खोलेर "Continue with Google" थिच्नुहोस् र यही Gmail बाट लग-इन गर्नुहोस्:\n${email}`;
+      return `नमस्ते ${staffName || email},\n"${business.businessName}" POS एपमा तपाईंलाई ${role} भूमिका दिइएको छ।\n\n१) यो डाइरेक्ट लिंक खोल्नुहोस्:\n${directJoinUrl}\n\n२) एप खुलेपछि "Continue with Google" वा यही इमेल (${email}) बाट लग-इन गर्नुहोस्${
+        inviteCode ? ` (वा Invite Code: ${inviteCode})` : ''
+      }।`;
     }
-    return `Hi ${staffName || email},\nYou have been granted ${role} access to "${business.businessName}".\n\n1) Open this link in Chrome/Safari to install the app on your mobile:\n${appInstallUrl}\n\n2) Open the app, tap "Continue with Google", and sign in with:\n${email}`;
+    return `Hi ${staffName || email},\nYou have been granted ${role} access to "${business.businessName}".\n\n1) Open your quick join link:\n${directJoinUrl}\n\n2) Sign in with "Continue with Google" or Email Login (${email})${
+      inviteCode ? `, or activate code ${inviteCode}` : ''
+    }.`;
   };
 
-  const handleCopyStaffInviteShare = async (key: string, staffName: string, email: string, role: StaffRole) => {
-    const text = buildStaffInviteShareText(staffName, email, role);
+  const handleCopyStaffInviteShare = async (
+    key: string,
+    staffName: string,
+    email: string,
+    role: StaffRole,
+    inviteCode?: string
+  ) => {
+    const text = buildStaffInviteShareText(staffName, email, role, inviteCode);
     try {
       await navigator.clipboard.writeText(text);
       setCopiedInviteKey(key);
       setTimeout(() => setCopiedInviteKey(null), 2500);
-      showBanner(lang === 'ne' ? 'स्टाफ निमन्त्रणा मेसेज र एप लिंक कपी भयो!' : 'Staff invite message & app link copied!');
+      showBanner(lang === 'ne' ? 'स्टाफ निमन्त्रणा मेसेज र डाइरेक्ट लिंक कपी भयो!' : 'Staff invite message & join link copied!');
     } catch {
-      setCloudAccessError(lang === 'ne' ? 'मेसेज कपी गर्न सकिएन — माथिको Download लिंक सेयर गर्नुहोस्।' : 'Could not copy to clipboard.');
+      setCloudAccessError(lang === 'ne' ? 'मेसेज कपी गर्न सकिएन — माथिको लिंक सेयर गर्नुहोस्।' : 'Could not copy to clipboard.');
     }
   };
 
-  const handleShareStaffInviteNative = async (staffName: string, email: string, role: StaffRole) => {
-    const text = buildStaffInviteShareText(staffName, email, role);
+  const handleShareStaffInviteNative = async (
+    staffName: string,
+    email: string,
+    role: StaffRole,
+    inviteCode?: string
+  ) => {
+    const text = buildStaffInviteShareText(staffName, email, role, inviteCode);
     const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-    const appInstallUrl = buildAppDownloadUrl(resolveDefaultPublicAppUrl(publicOrigin), business.businessId);
+    const directJoinUrl = buildStaffInviteUrl({
+      baseUrl: resolveDefaultPublicAppUrl(publicOrigin),
+      businessId: business.businessId,
+      inviteCode,
+      email: email.includes('@') ? email : undefined,
+      name: staffName || undefined
+    });
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: `${business.businessName} — Staff Access (${role})`,
           text,
-          url: appInstallUrl
+          url: directJoinUrl
         });
         return;
       } catch {
         // User cancelled native share sheet
       }
     }
-    await handleCopyStaffInviteShare(`share-${email}`, staffName, email, role);
+    await handleCopyStaffInviteShare(`share-${email}`, staffName, email, role, inviteCode);
   };
 
   const handleRevokeCloudInvite = async (invite: CloudStaffInvite) => {
@@ -1958,6 +1996,98 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               </>
             )}
           </div>
+
+          {/* Pending Staff Invite Codes (QR / 1-Tap Direct Join Link) */}
+          {(appState.staffInvitations || []).length > 0 && (
+            <div className="pt-4 border-t border-slate-100 space-y-3 text-xs">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {lang === 'ne' ? 'स्टाफ निमन्त्रणा कोडहरू (Invite Codes)' : 'Staff Invitation Codes'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {lang === 'ne'
+                      ? 'निमन्त्रणा लिंक कपी गरी स्टाफलाई पठाउनुहोस् — खोल्नासाथ कोड र इमेल स्वतः भरिन्छ।'
+                      : 'Copy a 1-tap direct link so invited staff land straight on their pre-filled activation screen.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2 px-3">Code</th>
+                      <th className="py-2 px-3">Email / Phone</th>
+                      <th className="py-2 px-3">Role</th>
+                      <th className="py-2 px-3">Status</th>
+                      <th className="py-2 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {(appState.staffInvitations || []).slice(0, 15).map(inv => (
+                      <tr key={inv.id}>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{inv.inviteCode}</td>
+                        <td className="py-2.5 px-3 text-slate-700">{inv.emailOrPhone}</td>
+                        <td className="py-2.5 px-3 font-bold text-slate-800">{inv.role}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            inv.status === 'ACCEPTED'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : inv.status === 'PENDING'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-rose-50 text-rose-800 border-rose-200'
+                          }`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {inv.status === 'PENDING' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handleCopyStaffInviteShare(
+                                    inv.id,
+                                    inv.emailOrPhone,
+                                    inv.emailOrPhone,
+                                    inv.role,
+                                    inv.inviteCode
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+                              >
+                                {copiedInviteKey === inv.id ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                                <span>{copiedInviteKey === inv.id ? 'Copied' : 'Copy Join Link'}</span>
+                              </button>
+                            )}
+                            {inv.status === 'PENDING' && canActorManageStaffMember(actorRole, inv.role) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  revokeStaffInvitation(business.businessId, inv.id);
+                                  onUpdateAppState(prev => ({
+                                    ...prev,
+                                    staffInvitations: (prev.staffInvitations || []).map(item =>
+                                      item.id === inv.id ? { ...item, status: 'REVOKED' as const } : item
+                                    )
+                                  }));
+                                  recordAudit('STAFF_INVITATION_REVOKED', inv.id, `Revoked invite code ${inv.inviteCode}`, 'WARNING');
+                                }}
+                                className="px-2.5 py-1 rounded-lg font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3710,6 +3840,13 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
         businessName={business.businessName}
         currentStaff={{ id: currentSession?.staffId || 'admin', name: currentSession?.name || 'Admin' }}
         actorRole={actorRole}
+        lang={lang}
+        existingStaffUsers={appState.staffUsers}
+        cloudSyncConnected={cloudSyncConnected}
+        cloudOwnerUid={cloudOwnerUid}
+        onCloudInviteCreated={() => {
+          void refreshCloudAccessLists();
+        }}
         onInvitationCreated={(invite) => {
           onUpdateAppState(prev => ({
             ...prev,

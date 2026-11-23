@@ -3,6 +3,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   auth,
   formatFirebaseAuthError,
+  registerWithEmailPassword,
   sendPasswordReset,
   sendUserEmailVerification,
   signInWithEmailPassword,
@@ -613,6 +614,15 @@ export default function App() {
       setCloudAuthError(null);
       explicitGoogleSignInRef.current = true;
       try {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('hb_remembered_login_email', email.trim().toLowerCase());
+          } else {
+            localStorage.removeItem('hb_remembered_login_email');
+          }
+        } catch {
+          // Ignore storage quota issues
+        }
         const signedInUser = await signInWithEmailPassword(email, password, rememberMe);
         if (!signedInUser.emailVerified) {
           try {
@@ -625,7 +635,7 @@ export default function App() {
           const verifyMsg =
             language === 'ne'
               ? `तपाईंको इमेल (${signedInUser.email}) अझै प्रमाणित (Verified) भएको छैन। इनबक्समा पठाइएको Verification लिंक क्लिक गरेर पुनः लग-इन गर्नुहोस्।`
-              : `Email (${signedInUser.email}) is not verified yet. We sent a verification link to your inbox — verify it and log in again.`;
+              : `Email (${signedInUser.email}) is not verified yet. We sent a verification link to your inbox — click it, then tap Log in.`;
           setCloudAuthError(verifyMsg);
           return { success: false, error: verifyMsg };
         }
@@ -681,6 +691,40 @@ export default function App() {
       }
     },
     [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess, language]
+  );
+
+  const handleEmailPasswordSignUp = useCallback(
+    async (
+      email: string,
+      password: string,
+      fullName: string,
+      rememberMe: boolean
+    ): Promise<{ success: boolean; error?: string; message?: string }> => {
+      setCloudAuthError(null);
+      try {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('hb_remembered_login_email', email.trim().toLowerCase());
+          }
+        } catch {
+          // Ignore storage issues
+        }
+        const createdUser = await registerWithEmailPassword(email, password, rememberMe, fullName);
+        // Firestore rules enforce verified email; sign out cleanly until staff taps inbox link
+        await signOutFirebase();
+        return {
+          success: true,
+          message:
+            language === 'ne'
+              ? `${createdUser.email} मा खाता बन्यो र Verification लिंक पठाइयो! इनबक्सको लिंक क्लिक गरेर सिधै "Log in" थिच्नुहोस्।`
+              : `Account created for ${createdUser.email}! Click the verification link sent to your inbox, then tap Log in.`
+        };
+      } catch (err) {
+        const msg = formatFirebaseAuthError(err, language);
+        return { success: false, error: msg };
+      }
+    },
+    [language]
   );
 
   const handleSendPasswordReset = useCallback(
@@ -4091,9 +4135,12 @@ export default function App() {
         ownerControlLocked={ownerControlLocked}
         cloudUserEmail={firebaseUser?.email || null}
         isGoogleAuthLoading={isGoogleAuthLoading}
+        isCloudConnecting={cloudSyncStatus === 'connecting'}
         cloudAuthError={cloudAuthError}
+        pendingInvitations={appState.staffInvitations || []}
         onGoogleSignIn={handleGoogleSignIn}
         onEmailPasswordSignIn={handleEmailPasswordSignIn}
+        onEmailPasswordSignUp={handleEmailPasswordSignUp}
         onSendPasswordReset={handleSendPasswordReset}
         onRotateStaffPin={handleRotateStaffPin}
         onAcceptInviteCode={async ({ inviteCode, username, fullName, pin }) => {
@@ -4114,6 +4161,17 @@ export default function App() {
                 inv.inviteCode === normalizedCode ? { ...inv, status: 'ACCEPTED' as const } : inv
               )
             }));
+            if (typeof window !== 'undefined' && window.history?.replaceState) {
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('invite');
+                url.searchParams.delete('email');
+                url.searchParams.delete('name');
+                window.history.replaceState({}, '', url.toString());
+              } catch {
+                // Ignore history cleanup issues
+              }
+            }
             recordAudit(
               'STAFF_INVITATION_ACCEPTED',
               res.staffUser.id,

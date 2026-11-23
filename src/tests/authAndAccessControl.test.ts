@@ -19,6 +19,7 @@ import {
   canActorAssignRole
 } from '../services/security';
 import { formatFirebaseAuthError } from '../firebase';
+import { buildStaffInviteUrl } from '../utils/distribution';
 import { StaffRole, StaffUser } from '../types';
 
 test('Authentication: Salted SHA-256 PIN hashing & verification', async () => {
@@ -203,5 +204,22 @@ test('Firestore Rules: Manager subordinate-only & Admin role constraints on invi
   assert.ok(rulesText.includes('function isSubordinateStaffRole(role)'), 'Subordinate role helper must be defined in firestore.rules');
   assert.ok(rulesText.includes("hasMemberRole(businessId, ['MANAGER']) && isSubordinateStaffRole(incoming().role)"), 'Invites create rule must restrict MANAGER to subordinate staff roles');
   assert.ok(rulesText.includes('isSubordinateStaffRole(existing().role) &&\n              isSubordinateStaffRole(incoming().role)'), 'Invites and members update rules must block MANAGER privilege escalation');
+});
+
+test('Staff Invite Link: Builds direct pre-filled join URL without download portal detour', () => {
+  const url = buildStaffInviteUrl({
+    baseUrl: 'https://pos.example.com/',
+    businessId: 'biz-himalayan-breeze',
+    inviteCode: 'inv-abc123',
+    email: 'Sita@Example.com',
+    name: 'Sita Gurung'
+  });
+  assert.ok(url.startsWith('https://pos.example.com/?'));
+  assert.ok(!url.includes('download=1'), 'Direct join link must land straight on login/invite screen');
+  const parsed = new URL(url);
+  assert.strictEqual(parsed.searchParams.get('biz'), 'biz-himalayan-breeze');
+  assert.strictEqual(parsed.searchParams.get('invite'), 'INV-ABC123');
+  assert.strictEqual(parsed.searchParams.get('email'), 'sita@example.com');
+  assert.strictEqual(parsed.searchParams.get('name'), 'Sita Gurung');
 });
 

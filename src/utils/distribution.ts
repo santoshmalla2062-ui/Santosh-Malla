@@ -61,6 +61,30 @@ export function buildAppDirectUrl(baseUrl: string, businessId?: string): string 
   return `${cleanBase}/`;
 }
 
+export function buildStaffInviteUrl(params: {
+  baseUrl: string;
+  businessId?: string;
+  inviteCode?: string;
+  email?: string;
+  name?: string;
+}): string {
+  const cleanBase = sanitizePublicBaseUrl(params.baseUrl) || SHARED_APP_URL;
+  const query: string[] = [];
+  if (params.businessId && /^[a-zA-Z0-9_-]{2,128}$/.test(params.businessId.trim())) {
+    query.push(`biz=${encodeURIComponent(params.businessId.trim())}`);
+  }
+  if (params.inviteCode && params.inviteCode.trim()) {
+    query.push(`invite=${encodeURIComponent(params.inviteCode.trim().toUpperCase())}`);
+  }
+  if (params.email && params.email.trim()) {
+    query.push(`email=${encodeURIComponent(params.email.trim().toLowerCase())}`);
+  }
+  if (params.name && params.name.trim()) {
+    query.push(`name=${encodeURIComponent(params.name.trim().slice(0, 60))}`);
+  }
+  return query.length > 0 ? `${cleanBase}/?${query.join('&')}` : `${cleanBase}/`;
+}
+
 export function sanitizeAndroidApkUrl(rawUrl: string): string {
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return '';
