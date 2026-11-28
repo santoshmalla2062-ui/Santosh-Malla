@@ -15,6 +15,7 @@ import {
   Session
 } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 
 export interface CheckInGuestStayUpdates {
   guestName?: string;
@@ -292,12 +293,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
                 <label className="block text-slate-700 font-bold mb-1">
                   Nightly Room Rate ({settings.currencySymbol}):
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
+                <NumberInput
+                  min={0}
                   value={roomRate}
-                  onChange={(e) => setRoomRate(Number(e.target.value))}
+                  onValueChange={(val) => setRoomRate(val)}
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                   required
                 />
@@ -409,12 +408,10 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
                 <label className="block text-slate-700 font-bold mb-1">
                   Deposit Amount ({settings.currencySymbol}):
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
+                <NumberInput
+                  min={0}
                   value={depositAmount}
-                  onChange={(e) => setDepositAmount(Number(e.target.value))}
+                  onValueChange={(val) => setDepositAmount(val)}
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num text-slate-900"
                 />
               </div>

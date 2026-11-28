@@ -15,6 +15,7 @@ import { BusinessSettings, MenuItem, Order, OrderItem } from '../../types';
 import { Language } from '../../utils/translations';
 import { carveItemsForSplitBill, splitAmountEqually } from '../../utils/splitBilling';
 import { getNextInvoiceNumber } from '../../services/storage';
+import { NumberInput } from '../common/NumberInput';
 
 interface SplitBillModalProps {
   order: Order;
@@ -556,14 +557,13 @@ export const SplitBillModal: React.FC<SplitBillModalProps> = ({
                     </span>
                     <div className="flex items-center gap-1 flex-1">
                       <span className="text-xs text-slate-500">{settings.currencySymbol}</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={shareAmt || ''}
-                        onChange={(e) => {
-                          const val = Math.max(0, Number(e.target.value) || 0);
-                          setCustomShares((prev) => prev.map((v, i) => (i === idx ? val : v)));
+                      <NumberInput
+                        min={0}
+                        blankWhenZero
+                        value={shareAmt}
+                        onValueChange={(val) => {
+                          const safeVal = Math.max(0, val);
+                          setCustomShares((prev) => prev.map((v, i) => (i === idx ? safeVal : v)));
                         }}
                         className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded text-xs font-mono-num font-bold text-slate-900 text-right"
                       />

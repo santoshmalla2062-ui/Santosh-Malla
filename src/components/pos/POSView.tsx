@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   Search, 
   Plus, 
@@ -87,6 +88,7 @@ import { KOTModal } from './KOTModal';
 import { MenuManagerModal } from '../menu/MenuManagerModal';
 import { ActiveOrdersModal } from './ActiveOrdersModal';
 import { SplitBillModal } from './SplitBillModal';
+import { TaxSettingsModal } from './TaxSettingsModal';
 import { hasPermission, validateInventoryStock, verifyFinancialCalculations } from '../../services/security';
 import { isNetworkOnline } from '../../services/syncService';
 import { getNextKOTNumber, getNextInvoiceNumber } from '../../services/storage';
@@ -178,6 +180,9 @@ export const POSView: React.FC<POSViewProps> = ({
   const canModifyPricing = userRole ? hasPermission(userRole, 'MODIFY_PRICING') : false;
   const canApplyDiscount = userRole ? hasPermission(userRole, 'APPLY_DISCOUNT') : false;
   const canSendKOT = userRole ? hasPermission(userRole, 'SEND_KOT') : false;
+  const canModifyTaxConfig = userRole
+    ? hasPermission(userRole, 'MODIFY_TAX_CONFIG', undefined, settings.customRolePermissions)
+    : false;
 
   // Order Type state: Dine-in, Takeaway, Delivery
   const [orderType, setOrderType] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
@@ -348,6 +353,7 @@ export const POSView: React.FC<POSViewProps> = ({
   const [showEstimateModal, setShowEstimateModal] = useState(false);
   const [estimateOrderTarget, setEstimateOrderTarget] = useState<Order | null>(null);
   const [showAdminPricingModal, setShowAdminPricingModal] = useState(false);
+  const [showTaxSettingsModal, setShowTaxSettingsModal] = useState(false);
   const [adminCustomDiscountPct, setAdminCustomDiscountPct] = useState<number>(0);
   const [adminWaiveSC, setAdminWaiveSC] = useState<boolean>(false);
   const [adminWaiveVat, setAdminWaiveVat] = useState<boolean>(false);
@@ -1447,6 +1453,26 @@ export const POSView: React.FC<POSViewProps> = ({
         </div>
 
         <div className="flex items-center justify-between sm:justify-end gap-2 text-xs">
+          {canModifyTaxConfig && onUpdateSettings && (
+            <button
+              type="button"
+              onClick={() => setShowTaxSettingsModal(true)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-bold transition-all ${
+                settings.enableVat || settings.enableServiceCharge
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300 shadow-2xs'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+              }`}
+              title={lang === 'ne' ? 'भ्याट र सर्भिस चार्ज On/Off वा दर सेटिङ' : 'Configure or toggle VAT & Service Charge'}
+            >
+              <Percent className="h-3.5 w-3.5 text-amber-700" />
+              <span>
+                {settings.enableVat || settings.enableServiceCharge
+                  ? `${settings.enableVat ? `VAT ${settings.vatRatePercent}%` : 'VAT Off'} · ${settings.enableServiceCharge ? `SC ${settings.serviceChargePercent}%` : 'SC Off'}`
+                  : (lang === 'ne' ? 'कर: बन्द (Tax Off)' : 'Tax: Off')}
+              </span>
+            </button>
+          )}
+
           {/* Sound FX Toggle */}
           <button
             type="button"
@@ -2811,11 +2837,10 @@ export const POSView: React.FC<POSViewProps> = ({
                         {editingItemPriceIdx === idx ? (
                           <div className="flex items-center gap-1 pl-5 pt-1">
                             <span className="text-[10px] font-bold text-slate-500">{settings.currencySymbol}</span>
-                            <input
-                              type="number"
-                              min="0"
+                            <NumberInput
+                              min={0}
                               value={tempPriceValue}
-                              onChange={(e) => setTempPriceValue(Number(e.target.value))}
+                              onValueChange={(val) => setTempPriceValue(val)}
                               className="w-16 px-1 py-0.5 text-xs font-bold font-mono border border-indigo-400 rounded bg-white text-slate-900"
                               autoFocus
                             />
@@ -3054,12 +3079,13 @@ export const POSView: React.FC<POSViewProps> = ({
                             {settings.currencySymbol}{amt}
                           </button>
                         ))}
-                        <input
-                          type="number"
+                        <NumberInput
+                          min={0}
+                          blankWhenZero
                           placeholder="Custom"
-                          value={flatDiscountAmount || ''}
-                          onChange={(e) => {
-                            setFlatDiscountAmount(Math.max(0, Number(e.target.value)));
+                          value={flatDiscountAmount}
+                          onValueChange={(val) => {
+                            setFlatDiscountAmount(Math.max(0, val));
                             setDiscountPercent(0);
                           }}
                           className="w-14 px-1 py-0.5 text-[10px] font-bold border border-slate-300 rounded text-right font-mono"
@@ -3228,14 +3254,30 @@ export const POSView: React.FC<POSViewProps> = ({
                   <span className="font-mono-num font-bold text-slate-900">{settings.currencySymbol} {subtotal.toFixed(2)}</span>
                 </div>
 
-                {((settings.enableServiceCharge && !isTakeawayOrDelivery) || settings.enableVat) && (
-                  <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-slate-500 pt-0.5 border-t border-slate-100">
-                    {settings.enableServiceCharge && !isTakeawayOrDelivery ? (
-                      <span>SC ({enableSC ? settings.serviceChargePercent : 0}%): <strong className="font-mono-num text-slate-700">{settings.currencySymbol}{serviceChargeAmount.toFixed(1)}</strong></span>
-                    ) : <span />}
-                    {settings.enableVat ? (
-                      <span>VAT ({enableVatCalculations ? settings.vatRatePercent : 0}%): <strong className="font-mono-num text-slate-700">{settings.currencySymbol}{vatAmount.toFixed(1)}</strong></span>
-                    ) : null}
+                {((settings.enableServiceCharge && !isTakeawayOrDelivery) || settings.enableVat || (canModifyTaxConfig && onUpdateSettings)) && (
+                  <div className="flex justify-between items-center gap-2 text-[10px] sm:text-[11px] text-slate-500 pt-0.5 border-t border-slate-100">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      {settings.enableServiceCharge && !isTakeawayOrDelivery ? (
+                        <span>SC ({enableSC ? settings.serviceChargePercent : 0}%): <strong className="font-mono-num text-slate-700">{settings.currencySymbol}{serviceChargeAmount.toFixed(1)}</strong></span>
+                      ) : null}
+                      {settings.enableVat ? (
+                        <span>VAT ({enableVatCalculations ? settings.vatRatePercent : 0}%): <strong className="font-mono-num text-slate-700">{settings.currencySymbol}{vatAmount.toFixed(1)}</strong></span>
+                      ) : null}
+                      {!settings.enableVat && (!settings.enableServiceCharge || isTakeawayOrDelivery) && (
+                        <span className="text-slate-400">{lang === 'ne' ? 'कर / शुल्क बन्द छ' : 'VAT & SC Off'}</span>
+                      )}
+                    </div>
+                    {canModifyTaxConfig && onUpdateSettings && (
+                      <button
+                        type="button"
+                        onClick={() => setShowTaxSettingsModal(true)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold text-[10px] shrink-0 transition-colors"
+                        title={lang === 'ne' ? 'भ्याट / सर्भिस चार्ज On/Off वा परिवर्तन गर्नुहोस्' : 'Toggle or change VAT / Service Charge'}
+                      >
+                        <Percent className="h-2.5 w-2.5" />
+                        <span>{lang === 'ne' ? 'कर सेटिङ' : 'Tax On/Off'}</span>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -3917,6 +3959,24 @@ export const POSView: React.FC<POSViewProps> = ({
         />
       )}
 
+      {/* Business Tax & Service Charge On/Off & Rate Settings Modal (Admin & Manager) */}
+      {showTaxSettingsModal && onUpdateSettings && (
+        <TaxSettingsModal
+          settings={settings}
+          lang={lang}
+          onClose={() => setShowTaxSettingsModal(false)}
+          onSave={(updatedSettings) => {
+            onUpdateSettings(updatedSettings);
+            setStatusBanner({
+              text: lang === 'ne'
+                ? `कर सेटिङ अपडेट भयो: VAT ${updatedSettings.enableVat ? updatedSettings.vatRatePercent + '%' : 'बन्द'}, SC ${updatedSettings.enableServiceCharge ? updatedSettings.serviceChargePercent + '%' : 'बन्द'}`
+                : `Tax settings saved: VAT ${updatedSettings.enableVat ? updatedSettings.vatRatePercent + '%' : 'Off'}, SC ${updatedSettings.enableServiceCharge ? updatedSettings.serviceChargePercent + '%' : 'Off'}`,
+              type: 'success'
+            });
+          }}
+        />
+      )}
+
       {/* Active Orders & Live Billing Hub Modal */}
       {showActiveOrdersModal && (
         <ActiveOrdersModal
@@ -4041,12 +4101,12 @@ export const POSView: React.FC<POSViewProps> = ({
                   ))}
                 </div>
                 <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={adminCustomDiscountPct || ''}
-                    onChange={(e) => setAdminCustomDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                  <NumberInput
+                    min={0}
+                    max={100}
+                    blankWhenZero
+                    value={adminCustomDiscountPct}
+                    onValueChange={(val) => setAdminCustomDiscountPct(Math.min(100, Math.max(0, val)))}
                     placeholder="Custom % (0-100)"
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold font-mono"
                   />
@@ -4611,6 +4671,20 @@ export const POSView: React.FC<POSViewProps> = ({
                 <PauseCircle className="h-4 w-4 text-slate-600 shrink-0" />
                 <span>{lang === 'ne' ? `होल्ड ड्राफ्ट (${heldDrafts.length})` : `Held Drafts (${heldDrafts.length})`}</span>
               </button>
+
+              {canModifyTaxConfig && onUpdateSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileMoreSheet(false);
+                    setShowTaxSettingsModal(true);
+                  }}
+                  className="min-h-[44px] px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold flex items-center gap-2 text-left"
+                >
+                  <Percent className="h-4 w-4 text-amber-700 shrink-0" />
+                  <span>{lang === 'ne' ? 'कर / भ्याट On/Off' : 'Tax & VAT On/Off'}</span>
+                </button>
+              )}
 
               {isAdminOrManager && (
                 <button

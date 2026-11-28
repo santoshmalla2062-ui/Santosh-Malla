@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Percent, Check, Settings2, ShieldCheck, HelpCircle, DollarSign, Building } from 'lucide-react';
 import { BusinessSettings } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 
 interface TaxSettingsModalProps {
   settings: BusinessSettings;
@@ -78,8 +79,8 @@ export const TaxSettingsModal: React.FC<TaxSettingsModalProps> = ({
               </h3>
               <p className="text-[11px] text-slate-300">
                 {lang === 'ne' 
-                  ? 'एडमिनले बिलमा लागु हुने भ्याट र सर्भिस चार्ज निर्धारण वा बन्द गर्न सक्ने ठाउँ।' 
-                  : 'Configure whether VAT (13%) and Service Charge (10%) are billed on orders.'}
+                  ? 'एडमिन वा म्यानेजरले बिलमा लागु हुने भ्याट र सर्भिस चार्ज निर्धारण वा बन्द गर्न सक्ने ठाउँ।' 
+                  : 'Admin or Manager can enable, disable, or update VAT and Service Charge rates.'}
               </p>
             </div>
           </div>
@@ -177,12 +178,11 @@ export const TaxSettingsModal: React.FC<TaxSettingsModalProps> = ({
             {enableSC && (
               <div className="flex items-center gap-2 pt-1 border-t border-slate-200">
                 <span className="text-[11px] font-bold text-slate-600">दर (Rate %):</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
+                <NumberInput
+                  min={0}
+                  max={50}
                   value={scRate}
-                  onChange={(e) => setScRate(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setScRate(val)}
                   className="w-20 px-2 py-1 bg-white border border-slate-300 rounded font-mono-num font-bold text-xs"
                 />
                 <span className="text-slate-500 font-bold">%</span>
@@ -217,12 +217,11 @@ export const TaxSettingsModal: React.FC<TaxSettingsModalProps> = ({
             {enableVat && (
               <div className="flex items-center gap-2 pt-1 border-t border-slate-200">
                 <span className="text-[11px] font-bold text-slate-600">भ्याट दर (VAT Rate %):</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="50"
+                <NumberInput
+                  min={0}
+                  max={50}
                   value={vatRate}
-                  onChange={(e) => setVatRate(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setVatRate(val)}
                   className="w-20 px-2 py-1 bg-white border border-slate-300 rounded font-mono-num font-bold text-xs"
                 />
                 <span className="text-slate-500 font-bold">% (Nepal Standard: 13%)</span>

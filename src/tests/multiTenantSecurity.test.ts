@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { 
   getRegisteredBusinesses, 
+  getBusinessesForUser,
+  canActorCreateBusiness,
   registerNewBusiness, 
   saveTenantAppState, 
   loadTenantAppState, 
@@ -9,6 +11,7 @@ import {
   TENANT_STORAGE_PREFIX, 
   BUSINESSES_REGISTRY_KEY 
 } from '../services/tenantStorage';
+import { hasPermission } from '../services/security';
 import { getInitialAppState } from '../services/storage';
 import { StaffUser, BusinessTenant, Session } from '../types';
 
@@ -147,3 +150,91 @@ test('Multi-Tenant Authorization: User Membership & Super Admin Access', () => {
   assert.strictEqual(superAccessPokhara, true, 'SUPER_ADMIN must be authorized across all tenants');
   assert.strictEqual(superAccessKathmandu, true, 'SUPER_ADMIN must be authorized across all tenants');
 });
+
+test('Multi-Tenant Security: One-business-per-account cap & zero foreign workspace leakage', () => {
+  localStorage.clear();
+
+  // 1. Fresh owner can create their first business
+  const firstCheck = canActorCreateBusiness({
+    id: 'owner-single-1',
+    role: 'OWNER',
+    email: 'ramcafe@example.com'
+  });
+  assert.strictEqual(firstCheck.allowed, true);
+
+  const firstCreated = registerNewBusiness({
+    businessName: 'Ram Lakeside Coffee',
+    businessType: 'CAFE',
+    phone: '9841000011',
+    email: 'ramcafe@example.com',
+    address: 'Pokhara',
+    ownerId: 'owner-single-1',
+    ownerName: 'Ram Thapa',
+    environment: 'production',
+    enforceSingleBusinessCap: true,
+    actorRole: 'OWNER'
+  });
+
+  // 2. Second business creation by the same owner MUST be blocked
+  const secondCheck = canActorCreateBusiness({
+    id: 'owner-single-1',
+    role: 'OWNER',
+    email: 'ramcafe@example.com',
+    businessId: firstCreated.business.businessId
+  });
+  assert.strictEqual(secondCheck.allowed, false, 'Owner with 1 business must be blocked from creating a 2nd business');
+
+  assert.throws(
+    () =>
+      registerNewBusiness({
+        businessName: 'Ram Second Restaurant',
+        businessType: 'RESTAURANT',
+        phone: '9841000022',
+        email: 'ramcafe@example.com',
+        address: 'Kathmandu',
+        ownerId: 'owner-single-1',
+        ownerName: 'Ram Thapa',
+        environment: 'production',
+        enforceSingleBusinessCap: true,
+        actorRole: 'OWNER'
+      }),
+    /Single-Business Policy/i
+  );
+
+  // 3. Staff roles (ADMIN / MANAGER) cannot create separate businesses
+  assert.strictEqual(hasPermission('ADMIN', 'CREATE_BUSINESS'), false);
+  assert.strictEqual(hasPermission('MANAGER', 'CREATE_BUSINESS'), false);
+  assert.strictEqual(
+    canActorCreateBusiness({ id: 'staff-mgr-1', role: 'MANAGER', businessId: firstCreated.business.businessId }).allowed,
+    false
+  );
+
+  // 4. Owner only sees their own business — NEVER pre-seeded/foreign businesses
+  const visibleToOwner = getBusinessesForUser('owner-single-1', 'OWNER', firstCreated.business.businessId);
+  assert.strictEqual(visibleToOwner.length, 1);
+  assert.strictEqual(visibleToOwner[0].businessId, firstCreated.business.businessId);
+  assert.strictEqual(
+    canUserAccessBusiness(
+      { id: 'owner-single-1', role: 'OWNER', businessId: firstCreated.business.businessId },
+      'biz-annapurna-coffee'
+    ),
+    false,
+    'Owner must NEVER access another business workspace'
+  );
+  assert.strictEqual(
+    canUserAccessBusiness(
+      { id: 'owner-single-1', role: 'OWNER', businessId: firstCreated.business.businessId },
+      'biz-phewa-dining'
+    ),
+    false
+  );
+
+  // 5. Verified SUPER_ADMIN retains multi-tenant creation and management
+  const superCheck = canActorCreateBusiness({
+    id: 'super-uid',
+    role: 'SUPER_ADMIN',
+    isAppCreator: true
+  });
+  assert.strictEqual(superCheck.allowed, true);
+});
+

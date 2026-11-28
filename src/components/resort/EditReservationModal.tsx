@@ -15,6 +15,7 @@ import {
   ResortRoom
 } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 
 export interface ReservationEditPayload {
   guestName: string;
@@ -291,19 +292,19 @@ export const EditReservationModal: React.FC<EditReservationModalProps> = ({
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Adults / Children</label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
                     value={adults}
-                    onChange={(e) => setAdults(Number(e.target.value))}
+                    onValueChange={(val) => setAdults(val)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                     title="Adults"
                   />
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberInput
+                    min={0}
+                    integer
                     value={children}
-                    onChange={(e) => setChildren(Number(e.target.value))}
+                    onValueChange={(val) => setChildren(val)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                     title="Children"
                   />
@@ -423,12 +424,10 @@ export const EditReservationModal: React.FC<EditReservationModalProps> = ({
                 <label className="block font-bold text-slate-700 mb-1">
                   Nightly Room Rate ({settings.currencySymbol})
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="50"
+                <NumberInput
+                  min={0}
                   value={roomRate}
-                  onChange={(e) => setRoomRate(Number(e.target.value))}
+                  onValueChange={(val) => setRoomRate(val)}
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                   required
                 />
@@ -437,12 +436,10 @@ export const EditReservationModal: React.FC<EditReservationModalProps> = ({
                 <label className="block font-bold text-slate-700 mb-1">
                   Discount ({settings.currencySymbol})
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="50"
+                <NumberInput
+                  min={0}
                   value={discountAmount}
-                  onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                  onValueChange={(val) => setDiscountAmount(val)}
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-rose-700"
                 />
               </div>

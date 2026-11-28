@@ -23,6 +23,7 @@ import {
   Session 
 } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 import { ResortInvoiceModal } from './ResortInvoiceModal';
 import { computeReservationFolioMetrics } from '../../services/resortSecurity';
 
@@ -225,14 +226,12 @@ export const CheckOutModal: React.FC<CheckOutModalProps> = ({
                     <label className="block text-[11px] font-bold text-emerald-900 mb-0.5">
                       Amount Paying Now:
                     </label>
-                    <input
-                      type="number"
-                      min="0"
+                    <NumberInput
+                      min={0}
                       max={balanceDue}
-                      step="any"
                       value={settlementAmount}
-                      onChange={(e) => {
-                        setSettlementAmount(Number(e.target.value));
+                      onValueChange={(val) => {
+                        setSettlementAmount(val);
                         if (confirmPartialCheckout) setConfirmPartialCheckout(false);
                       }}
                       className="w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-md font-mono-num font-bold text-emerald-950"

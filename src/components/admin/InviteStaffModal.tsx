@@ -182,6 +182,7 @@ export const InviteStaffModal: React.FC<InviteStaffModalProps> = ({
         try {
           await createCloudStaffInvite({
             businessId,
+            businessName,
             ownerUid: cloudOwnerUid,
             email: contact,
             staffName: cleanName || contact.split('@')[0] || 'Staff Member',

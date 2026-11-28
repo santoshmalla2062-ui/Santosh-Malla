@@ -60,6 +60,7 @@ interface SidebarNavigationProps {
   onOpenBusinessSwitcher?: () => void;
   onOpenMobileQR?: () => void;
   isAppCreator?: boolean;
+  canSwitchBusiness?: boolean;
 }
 
 export const SidebarNavigation: React.FC<SidebarNavigationProps> = ({
@@ -89,7 +90,8 @@ export const SidebarNavigation: React.FC<SidebarNavigationProps> = ({
   onOpenSuperAdmin,
   onOpenBusinessSwitcher,
   onOpenMobileQR,
-  isAppCreator = false
+  isAppCreator = false,
+  canSwitchBusiness = false
 }) => {
   const t = TRANSLATIONS[lang];
   const resolvedLogo = sanitizeBusinessLogoUrl(logoUrl) || sanitizeBusinessLogoUrl(activeBusiness?.logo);
@@ -294,19 +296,13 @@ export const SidebarNavigation: React.FC<SidebarNavigationProps> = ({
           <button
             type="button"
             onClick={
-              currentRole === 'SUPER_ADMIN' ||
-              currentRole === 'OWNER' ||
-              currentRole === 'ADMIN' ||
-              currentRole === 'MANAGER'
+              onOpenBusinessSwitcher && (currentRole === 'SUPER_ADMIN' || canSwitchBusiness)
                 ? onOpenBusinessSwitcher
                 : undefined
             }
             disabled={
               !(
-                currentRole === 'SUPER_ADMIN' ||
-                currentRole === 'OWNER' ||
-                currentRole === 'ADMIN' ||
-                currentRole === 'MANAGER'
+                onOpenBusinessSwitcher && (currentRole === 'SUPER_ADMIN' || canSwitchBusiness)
               )
             }
             title={activeBusiness?.businessName || 'Himalayan Breeze'}

@@ -31,6 +31,7 @@ import { BusinessSettings, Order, OrderItem, Session, StaffRole, TableRoom } fro
 import { Language, TRANSLATIONS } from '../../utils/translations';
 import { hasPermission } from '../../services/security';
 import { formatElapsedTime, getElapsedMinutes } from '../../utils/timeUtils';
+import { NumberInput } from '../common/NumberInput';
 
 interface ActiveOrdersModalProps {
   orders: Order[];
@@ -1371,12 +1372,11 @@ export const ActiveOrdersModal: React.FC<ActiveOrdersModalProps> = ({
                     </button>
                   ))}
                 </div>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
+                <NumberInput
+                  min={0}
+                  max={100}
                   value={adminDiscountPct}
-                  onChange={(e) => setAdminDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
+                  onValueChange={(val) => setAdminDiscountPct(Math.min(100, Math.max(0, val)))}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono-num font-bold"
                   placeholder="Custom % (e.g. 25)"
                 />

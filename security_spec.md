@@ -6,7 +6,8 @@ Master Owner Identity: `samjhamnamalla22444@gmail.com` (`email_verified == true`
 1. **Master Gate & Instant Revocation**: Every sub-collection read (`get`), create, update, or delete under `/businesses/{businessId}` must verify either `isMasterOwnerEmail()`, business document ownership (`ownerUid == request.auth.uid`), or active membership in `/businesses/{businessId}/members/{request.auth.uid}` where `isActive == true`. Deleting or deactivating a member immediately revokes access across all sub-collections.
 2. **Self-Assigned Role Prevention**: No non-owner user may create or mutate their own `role` in `/businesses/{businessId}/members/{uid}`. An employee may only create their own membership record in an atomic `WriteBatch` that consumes an Owner-issued `PENDING` invite document (`/businesses/{businessId}/invites/{inviteId}`) matching their verified email and exact invited `role`, transitioning that invite to `ACTIVE` (`getAfter`).
 3. **PII & Secret Channel Isolation**:
-   - Staff PIN hashes, permission matrices, security policies, and audit trails reside in `/syncChannels/admin_controls`, accessible strictly to Owner/Master Admin (`isMasterOwnerEmail() || isBusinessOwner(businessId)`).
+   - Billing lock policies (`ownerControlLocked`) and custom role matrices reside in `/syncChannels/admin_controls`, accessible strictly to Owner/Master Admin (`isMasterOwnerEmail() || isBusinessOwner(businessId)`).
+   - Staff terminal profiles and salted SHA-256 PIN hashes are sharded into `/businesses/{businessId}/staffAccounts/{staffId}`, accessible strictly to `OWNER`, `ADMIN`, and `MANAGER` (never `WAITER`, `CASHIER`, `KITCHEN`, or unverified accounts), with `SUPER_ADMIN` accounts protected against non-master deletion or mutation.
    - Customer credit/Khata ledgers and daily cash closings reside in `/syncChannels/finance_records`, accessible only to `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, `ACCOUNTANT`. `WAITER`, `KITCHEN`, and `HOUSEKEEPING` are strictly denied.
 4. **Tiered Action-Based Updates**:
    - Kitchen staff (`KITCHEN`) can update active KOT order statuses inside `orders_live` and stock deductions in `inventory_ledger`, but cannot touch `finance_records` or `admin_controls`.
@@ -17,7 +18,7 @@ Master Owner Identity: `samjhamnamalla22444@gmail.com` (`email_verified == true`
    - `createdAt` must equal `request.time` on create and remain immutable on update; `updatedAt` must equal `request.time` on create and update.
 6. **Zero Blanket `list` Queries**:
    - `/syncChannels/{channelId}` sets `allow list: if false;` (clients listen strictly to named document refs via `get`).
-   - `/businesses`, `/orders`, `/invites`, and `/members` never execute `get()` or `exists()` inside `allow list` blocks; they enforce ownership/membership directly on `resource.data`.
+   - `/businesses`, `/orders`, `/invites`, `/members`, and `/workspaceAccess` never execute `get()` or `exists()` inside `allow list` blocks; they enforce ownership, email match (`resource.data.email == request.auth.token.email`), or UID match directly on `resource.data`.
 
 ---
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   Building, 
   UtensilsCrossed, 
@@ -1682,11 +1683,12 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'बसाइ (रात संख्या):' : 'Nights of Stay:'}
                   </label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
+                    emptyValue={1}
                     value={nightsCount}
-                    onChange={(e) => setNightsCount(Math.max(1, Number(e.target.value)))}
+                    onValueChange={(val) => setNightsCount(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                   />
                 </div>
@@ -2011,11 +2013,11 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'क्षमता (Capacity):' : 'Capacity:'}
                   </label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
                     value={newCapacity}
-                    onChange={(e) => setNewCapacity(Number(e.target.value))}
+                    onValueChange={(val) => setNewCapacity(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num"
                   />
                 </div>
@@ -2053,10 +2055,10 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'प्रति रात दर (रू.):' : 'Nightly Rate (Rs.):'}
                   </label>
-                  <input
-                    type="number"
+                  <NumberInput
+                    min={0}
                     value={newRate}
-                    onChange={(e) => setNewRate(Number(e.target.value))}
+                    onValueChange={(val) => setNewRate(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                   />
                 </div>
@@ -2142,12 +2144,12 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'क्षमता (Seats):' : 'Capacity (Seats):'}
                   </label>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={1}
                     max={50}
+                    integer
                     value={editCapacity}
-                    onChange={(e) => setEditCapacity(Number(e.target.value))}
+                    onValueChange={(val) => setEditCapacity(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
                   />
                 </div>
@@ -2219,10 +2221,10 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'प्रति रात दर (रू.):' : 'Nightly Rate (Rs.):'}
                   </label>
-                  <input
-                    type="number"
+                  <NumberInput
+                    min={0}
                     value={editRate}
-                    onChange={(e) => setEditRate(Number(e.target.value))}
+                    onValueChange={(val) => setEditRate(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold"
                   />
                 </div>

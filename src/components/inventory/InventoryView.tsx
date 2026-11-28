@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   Package, 
   AlertTriangle, 
@@ -1177,25 +1178,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <form onSubmit={handleConfirmStockIn} className="space-y-3">
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Restock Quantity ({stockInTarget.unit}):</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="any"
+                <NumberInput
+                  min={0.01}
                   required
                   value={stockInQty}
-                  onChange={(e) => setStockInQty(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setStockInQty(val)}
                   className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Unit Cost Price ({settings.currencySymbol}):</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumberInput
+                  min={0}
                   value={stockInCost}
-                  onChange={(e) => setStockInCost(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setStockInCost(val)}
                   className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                 />
               </div>
@@ -1260,13 +1257,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <form onSubmit={handleConfirmStockOut} className="space-y-3">
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Deduct Quantity ({stockOutTarget.unit}):</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="any"
+                <NumberInput
+                  min={0.01}
                   required
                   value={stockOutQty}
-                  onChange={(e) => setStockOutQty(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setStockOutQty(val)}
                   className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold"
                 />
               </div>
@@ -1379,12 +1374,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Initial Stock:</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
+                  <NumberInput
+                    min={0}
                     value={newStock}
-                    onChange={(e) => setNewStock(parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => setNewStock(val)}
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
@@ -1408,12 +1401,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Cost / Unit ({settings.currencySymbol}):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
+                  <NumberInput
+                    min={0}
                     value={newCost}
-                    onChange={(e) => setNewCost(parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => setNewCost(val)}
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
@@ -1422,21 +1413,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Min Stock Alert:</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberInput
+                    min={0}
                     value={newMinAlert}
-                    onChange={(e) => setNewMinAlert(parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => setNewMinAlert(val)}
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Reorder Level:</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberInput
+                    min={0}
                     value={newReorderLevel}
-                    onChange={(e) => setNewReorderLevel(parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => setNewReorderLevel(val)}
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                   />
                 </div>
@@ -1554,15 +1543,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         ))}
                       </select>
 
-                      <input
-                        type="number"
-                        min="0.001"
-                        step="any"
+                      <NumberInput
+                        min={0.001}
                         value={ing.quantity}
-                        onChange={(e) => {
-                          const updated = [...recipeIngredients];
-                          updated[idx].quantity = parseFloat(e.target.value) || 0;
-                          setRecipeIngredients(updated);
+                        onValueChange={(val) => {
+                          setRecipeIngredients((prev) =>
+                            prev.map((item, i) => (i === idx ? { ...item, quantity: val } : item))
+                          );
                         }}
                         className="w-20 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-xs font-mono font-bold"
                       />
@@ -1633,17 +1620,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                       <label className="text-[11px] text-slate-500">Receive Now:</label>
-                      <input
-                        type="number"
-                        min="0"
+                      <NumberInput
+                        min={0}
                         max={item.quantityOrdered - item.quantityReceived}
-                        step="any"
                         value={grnReceiveInputs[item.inventoryItemId] ?? 0}
-                        onChange={(e) => {
-                          setGrnReceiveInputs({
-                            ...grnReceiveInputs,
-                            [item.inventoryItemId]: parseFloat(e.target.value) || 0
-                          });
+                        onValueChange={(val) => {
+                          setGrnReceiveInputs((prev) => ({
+                            ...prev,
+                            [item.inventoryItemId]: val
+                          }));
                         }}
                         className="w-20 px-2 py-1 bg-slate-50 border border-slate-300 rounded font-mono font-bold text-right text-xs"
                       />
@@ -1695,12 +1680,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Physical Counted Quantity ({auditTargetItem.unit}):</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumberInput
+                  min={0}
                   value={auditCount}
-                  onChange={(e) => setAuditCount(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setAuditCount(val)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-black text-sm"
                 />
               </div>
@@ -1781,12 +1764,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Transfer Quantity:</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="any"
+                <NumberInput
+                  min={0.01}
                   value={transferQty}
-                  onChange={(e) => setTransferQty(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setTransferQty(val)}
                   className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold"
                 />
               </div>

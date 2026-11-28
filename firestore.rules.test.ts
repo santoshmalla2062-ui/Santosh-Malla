@@ -73,13 +73,38 @@ test('Firestore Rules: Matches every entity schema and field allowlist from fire
   const entities = Object.keys(blueprint.entities || {});
   assert.deepStrictEqual(
     entities.sort(),
-    ['AdminRegistry', 'BusinessMember', 'BusinessWorkspace', 'FiscalOrderRecord', 'StaffInvite', 'SyncChannelState'].sort()
+    [
+      'AdminRegistry',
+      'AuditLogRecord',
+      'BusinessMember',
+      'BusinessWorkspace',
+      'CreditNoteRecord',
+      'FiscalOrderRecord',
+      'JournalEntryRecord',
+      'OwnerWorkspaceClaim',
+      'SequenceCounter',
+      'StaffAccountRecord',
+      'StaffInvite',
+      'SyncChannelState',
+      'WorkspaceAccessDirectory'
+    ].sort()
   );
 
   // AdminRegistry required fields
   for (const field of blueprint.entities.AdminRegistry.required) {
     assert.ok(rulesText.includes(`'${field}'`), `AdminRegistry field ${field} must appear in rules`);
   }
+  // WorkspaceAccessDirectory required fields
+  for (const field of blueprint.entities.WorkspaceAccessDirectory.required) {
+    assert.ok(rulesText.includes(`'${field}'`), `WorkspaceAccessDirectory field ${field} must appear in rules`);
+  }
+  assert.match(rulesText, /match \/workspaceAccess\/\{accessId\}/);
+  // StaffAccountRecord required fields + staffAccounts RBAC guards
+  for (const field of blueprint.entities.StaffAccountRecord.required) {
+    assert.ok(rulesText.includes(`'${field}'`), `StaffAccountRecord field ${field} must appear in rules`);
+  }
+  assert.match(rulesText, /match \/staffAccounts\/\{staffId\}/);
+  assert.match(rulesText, /function isValidStaffAccountDoc/);
   // FiscalOrderRecord required fields + WAITER/CASHIER/KITCHEN/ADMIN tiers
   for (const field of blueprint.entities.FiscalOrderRecord.required) {
     assert.ok(rulesText.includes(`'${field}'`), `FiscalOrderRecord field ${field} must appear in rules`);
@@ -191,3 +216,18 @@ test('Firestore Rules: Waiter can settle customer billing without discount/tax t
   assert.equal(keys.includes("'waivedVat'"), false, 'Waiter cannot waive VAT');
   assert.match(rulesText, /hasMemberRole\(businessId,\s*\['WAITER'\]\)\s*&&\s*incoming\(\)\.status in \['active', 'completed'\]/);
 });
+
+test('Firestore Rules: Enforces one-business-per-account lock via /ownerWorkspaces/{ownerUid}', () => {
+  assert.match(rulesText, /match \/ownerWorkspaces\/\{ownerUid\}/);
+  for (const field of blueprint.entities.OwnerWorkspaceClaim.required) {
+    assert.ok(rulesText.includes(`'${field}'`), `OwnerWorkspaceClaim field ${field} must appear in rules`);
+  }
+  assert.match(rulesText, /!exists\(\/databases\/\$\(database\)\/documents\/ownerWorkspaces\/\$\(request\.auth\.uid\)\)/);
+  assert.match(rulesText, /existsAfter\(\/databases\/\$\(database\)\/documents\/ownerWorkspaces\/\$\(request\.auth\.uid\)\)/);
+  assert.match(rulesText, /getAfter\(\/databases\/\$\(database\)\/documents\/ownerWorkspaces\/\$\(request\.auth\.uid\)\)\.data\.businessId == businessId/);
+  const ownerClaimBlock = rulesText.match(/match \/ownerWorkspaces\/\{ownerUid\}[\s\S]*?allow update:\s*if\s*([^;]+);[\s\S]*?allow delete:\s*if\s*([^;]+);/);
+  assert.ok(ownerClaimBlock, 'ownerWorkspaces must define immutable update and Master-only delete');
+  assert.strictEqual(ownerClaimBlock[1].trim(), 'false');
+  assert.strictEqual(ownerClaimBlock[2].trim(), 'isMasterOwnerEmail()');
+});
+

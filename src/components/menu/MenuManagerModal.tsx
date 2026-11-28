@@ -17,6 +17,7 @@ import {
   DollarSign,
   AlertCircle
 } from 'lucide-react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   BusinessSettings, 
   InventoryItem, 
@@ -520,12 +521,11 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">
                         {settings.currencySymbol}
                       </span>
-                      <input
-                        type="number"
-                        min="1"
+                      <NumberInput
+                        min={1}
                         required
                         value={price}
-                        onChange={(e) => handleRegularPriceChange(Number(e.target.value))}
+                        onValueChange={(val) => handleRegularPriceChange(val)}
                         className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-black text-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                       />
                     </div>
@@ -539,10 +539,10 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">
                         {settings.currencySymbol}
                       </span>
-                      <input
-                        type="number"
+                      <NumberInput
+                        min={0}
                         value={costPrice}
-                        onChange={(e) => setCostPrice(Number(e.target.value))}
+                        onValueChange={(val) => setCostPrice(val)}
                         className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-semibold text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                       />
                     </div>
@@ -556,11 +556,11 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                         <Clock className="h-4 w-4" />
                       </span>
-                      <input
-                        type="number"
-                        min="1"
+                      <NumberInput
+                        min={1}
+                        integer
                         value={prepTime}
-                        onChange={(e) => setPrepTime(Number(e.target.value))}
+                        onValueChange={(val) => setPrepTime(val)}
                         className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                       />
                     </div>
@@ -584,12 +584,11 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-rose-500">
                             {settings.currencySymbol}
                           </span>
-                          <input
-                            type="number"
-                            min="1"
-                            max={price - 1}
+                          <NumberInput
+                            min={1}
+                            max={Math.max(1, price - 1)}
                             value={offerPrice}
-                            onChange={(e) => handleOfferPriceChange(Number(e.target.value))}
+                            onValueChange={(val) => handleOfferPriceChange(val)}
                             className="w-full pl-9 pr-3 py-2 bg-white border-2 border-rose-300 rounded-lg font-mono-num font-black text-rose-700 text-sm focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
                           />
                         </div>
@@ -600,12 +599,11 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                           {lang === 'ne' ? 'छुट प्रतिशत (Discount %)' : 'Discount Percentage (%)'}
                         </label>
                         <div className="relative">
-                          <input
-                            type="number"
-                            min="1"
-                            max="99"
+                          <NumberInput
+                            min={1}
+                            max={99}
                             value={discountPercent}
-                            onChange={(e) => handleDiscountPercentChange(Number(e.target.value))}
+                            onValueChange={(val) => handleDiscountPercentChange(val)}
                             className="w-full px-3 py-2 bg-white border-2 border-rose-300 rounded-lg font-mono-num font-black text-rose-700 text-sm focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-rose-500">%</span>
@@ -810,11 +808,12 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                       onChange={(e) => setNewVariantName(e.target.value)}
                       className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
                     />
-                    <input
-                      type="number"
+                    <NumberInput
+                      min={0}
+                      blankWhenZero
                       placeholder="Price (Rs)"
-                      value={newVariantPrice || ''}
-                      onChange={(e) => setNewVariantPrice(Number(e.target.value))}
+                      value={newVariantPrice}
+                      onValueChange={(val) => setNewVariantPrice(val)}
                       className="w-24 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono-num"
                     />
                     <button
@@ -852,11 +851,12 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
                       onChange={(e) => setNewAddOnName(e.target.value)}
                       className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
                     />
-                    <input
-                      type="number"
+                    <NumberInput
+                      min={0}
+                      blankWhenZero
                       placeholder="Price (Rs)"
-                      value={newAddOnPrice || ''}
-                      onChange={(e) => setNewAddOnPrice(Number(e.target.value))}
+                      value={newAddOnPrice}
+                      onValueChange={(val) => setNewAddOnPrice(val)}
                       className="w-24 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono-num"
                     />
                     <button

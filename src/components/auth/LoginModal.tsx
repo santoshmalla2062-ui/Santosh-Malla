@@ -59,6 +59,7 @@ interface LoginModalProps {
   }) => Promise<{ success: boolean; error?: string; staffUser?: StaffUser }>;
   onOpenDownloadPortal?: () => void;
   onOpenMobileQR?: () => void;
+  onClearCloudAuthError?: () => void;
 }
 
 const deriveUsernameFromInput = (nameOrEmail: string): string => {
@@ -73,7 +74,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   staffUsers,
   lang,
-  businessName = 'Himalayan Breeze',
+  businessName = 'CAFe Host',
   businessLogoUrl,
   onLanguageChange,
   onLoginSuccess,
@@ -92,7 +93,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onRotateStaffPin,
   onAcceptInviteCode,
   onOpenDownloadPortal,
-  onOpenMobileQR
+  onOpenMobileQR,
+  onClearCloudAuthError
 }) => {
   const urlParams = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -209,13 +211,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       staffUsers[0];
 
   const visibleDemoPinRoles = getVisibleDemoPinRoles(ownerControlLocked);
-  const isEmbeddedWebView =
-    typeof navigator !== 'undefined' &&
-    /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(navigator.userAgent || '');
+  const userAgentStr = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isSocialInAppWebView = /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(userAgentStr);
+  const isAndroidApkWebView = !isSocialInAppWebView && /;\s*wv\)/i.test(userAgentStr);
+  const isEmbeddedWebView = isSocialInAppWebView || isAndroidApkWebView;
+
+  const clearErrors = () => {
+    setErrorMsg('');
+    onClearCloudAuthError?.();
+  };
 
   const switchMode = (next: 'email' | 'signup' | 'pin' | 'invite' | 'forgot') => {
     setLoginMode(next);
-    setErrorMsg('');
+    clearErrors();
     setInfoMsg('');
     if (next === 'forgot' && !resetEmailInput && emailInput) {
       setResetEmailInput(emailInput);
@@ -225,13 +233,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const handleKeypadPress = (val: string) => {
     if (pin.length < 6) {
       setPin((prev) => prev + val);
-      setErrorMsg('');
+      clearErrors();
     }
   };
 
   const handleBackspace = () => {
     setPin((prev) => prev.slice(0, -1));
-    setErrorMsg('');
+    clearErrors();
   };
 
   const handleEmailLoginSubmit = async (e: React.FormEvent) => {
@@ -549,26 +557,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 />
               </div>
             ) : (
-              <div className="h-16 w-16 rounded-full bg-orange-500 text-white shadow-md shadow-orange-500/25 flex items-center justify-center">
-                <svg
-                  viewBox="0 0 64 64"
-                  className="h-11 w-11"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
-                >
-                  <circle cx="32" cy="32" r="24" stroke="white" strokeWidth="2.2" strokeOpacity="0.95" />
-                  <circle cx="32" cy="32" r="19" stroke="white" strokeWidth="1.2" strokeOpacity="0.55" />
-                  <path d="M21 43L31.5 32.5" stroke="white" strokeWidth="2.8" strokeLinecap="round" />
-                  <ellipse cx="20" cy="44" rx="3.4" ry="4.6" transform="rotate(45 20 44)" fill="white" />
-                  <path d="M32 32L41 21" stroke="white" strokeWidth="2.8" strokeLinecap="round" />
-                  <path
-                    d="M38.5 18.5L43.5 23.5M40.5 16.5L44.5 20.5M42.5 18.5L46 15"
-                    stroke="white"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
+              <div className="h-16 w-16 rounded-2xl bg-slate-900 p-0.5 shadow-md shadow-slate-900/20 flex items-center justify-center overflow-hidden border border-amber-500/30">
+                <img
+                  src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
+                  alt={businessName || 'CAFe Host'}
+                  referrerPolicy="no-referrer"
+                  className="h-full w-full rounded-xl object-cover"
+                />
               </div>
             )}
 
@@ -617,6 +612,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </p>
             </div>
           </div>
+
+          {isCloudConnecting && !displayError && (
+            <div className="flex items-center gap-2.5 text-xs font-semibold text-orange-900 bg-orange-50 px-3.5 py-2.5 rounded-2xl border border-orange-200">
+              <Loader2 className="h-4 w-4 shrink-0 text-orange-500 animate-spin" />
+              <span className="truncate">
+                {cloudUserEmail && !isMasterOwnerEmail(cloudUserEmail)
+                  ? lang === 'ne'
+                    ? `${cloudUserEmail} को कार्यक्षेत्र जोडिँदैछ...`
+                    : `Restoring workspace for ${cloudUserEmail}...`
+                  : lang === 'ne'
+                  ? 'कार्यक्षेत्र जोडिँदैछ...'
+                  : 'Restoring workspace...'}
+              </span>
+            </div>
+          )}
 
           {/* Clean Mode Switcher for Email Auth (Sign In vs First-Time Email Setup) */}
           {!pendingRotationStaff && (loginMode === 'email' || loginMode === 'signup') && onEmailPasswordSignUp && (
@@ -740,7 +750,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   value={emailInput}
                   onChange={(e) => {
                     setEmailInput(e.target.value);
-                    setErrorMsg('');
+                    clearErrors();
                     setInfoMsg('');
                   }}
                   placeholder="you@restaurant.com"
@@ -764,7 +774,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     value={passwordInput}
                     onChange={(e) => {
                       setPasswordInput(e.target.value);
-                      setErrorMsg('');
+                      clearErrors();
                       setInfoMsg('');
                     }}
                     placeholder={lang === 'ne' ? 'आफ्नो पासवर्ड राख्नुहोस्' : 'Enter your password'}
@@ -809,7 +819,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div className="flex items-start gap-2 text-xs font-medium text-amber-900 bg-amber-50 p-3 rounded-2xl border border-amber-200">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
                   <span>
-                    {lang === 'ne'
+                    {isAndroidApkWebView
+                      ? lang === 'ne'
+                        ? 'Android App WebView भित्र Google पपअप रोकिएमा माथिको Email र Password (वा "नयाँ इमेल सेटअप") बाट लग-इन गर्नुहोस्।'
+                        : 'If Google Sign-In popup is restricted inside the Android App WebView, sign in directly with Email & Password above (or tap "First-Time Email").'
+                      : lang === 'ne'
                       ? 'Messenger भित्र Google लग-इन र App Install चल्दैन — माथि ⋮ थिचेर "Open in Chrome" गर्नुहोस्।'
                       : 'Google Sign-In & App Install do not work inside Messenger — tap ⋮ and open in Chrome or Safari.'}
                   </span>
@@ -941,7 +955,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   value={emailInput}
                   onChange={(e) => {
                     setEmailInput(e.target.value);
-                    setErrorMsg('');
+                    clearErrors();
                   }}
                   placeholder="staff@restaurant.com"
                   className="w-full min-h-[44px] px-4 py-2.5 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -960,7 +974,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     value={passwordInput}
                     onChange={(e) => {
                       setPasswordInput(e.target.value);
-                      setErrorMsg('');
+                      clearErrors();
                     }}
                     placeholder={lang === 'ne' ? 'कम्तीमा ६ अक्षर' : 'At least 6 characters'}
                     className="w-full min-h-[44px] pl-4 pr-12 py-2.5 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1011,7 +1025,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     value={resetEmailInput}
                     onChange={(e) => {
                       setResetEmailInput(e.target.value);
-                      setErrorMsg('');
+                      clearErrors();
                       setInfoMsg('');
                     }}
                     placeholder="you@restaurant.com"
@@ -1091,7 +1105,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   value={inviteCodeInput}
                   onChange={(e) => {
                     setInviteCodeInput(e.target.value.toUpperCase());
-                    setErrorMsg('');
+                    clearErrors();
                   }}
                   placeholder="INV-XXXXXX"
                   className="w-full min-h-[44px] px-3.5 py-2.5 text-sm font-mono font-bold tracking-wider bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1113,7 +1127,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       if (!usernameManuallyEdited) {
                         setInviteUsername(deriveUsernameFromInput(val));
                       }
-                      setErrorMsg('');
+                      clearErrors();
                     }}
                     placeholder={lang === 'ne' ? 'सीता गुरुङ' : 'Sita Gurung'}
                     className="w-full min-h-[44px] px-3.5 py-2 text-sm bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1130,7 +1144,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     onChange={(e) => {
                       setUsernameManuallyEdited(true);
                       setInviteUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''));
-                      setErrorMsg('');
+                      clearErrors();
                     }}
                     placeholder="sita"
                     className="w-full min-h-[44px] px-3.5 py-2 text-sm font-mono bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1153,7 +1167,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   value={invitePin}
                   onChange={(e) => {
                     setInvitePin(e.target.value.replace(/\D/g, ''));
-                    setErrorMsg('');
+                    clearErrors();
                   }}
                   placeholder="••••••"
                   className="w-full min-h-[46px] px-3.5 py-2.5 text-base font-mono text-center tracking-widest bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1211,7 +1225,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     value={staffIdentifier}
                     onChange={(e) => {
                       setStaffIdentifier(e.target.value);
-                      setErrorMsg('');
+                      clearErrors();
                     }}
                     placeholder={lang === 'ne' ? 'उदा. waiter, cashier, ram...' : 'e.g. waiter, cashier, ram...'}
                     className="w-full min-h-[46px] px-3.5 py-2.5 text-sm font-medium bg-white border-2 border-slate-200 rounded-2xl focus:border-orange-500 focus:outline-none"
@@ -1234,7 +1248,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                           onClick={() => {
                             setSelectedStaffId(user.id);
                             setPin('');
-                            setErrorMsg('');
+                            clearErrors();
                           }}
                           className={`min-h-[44px] p-2 rounded-xl border text-left transition-all flex flex-col justify-between ${
                             isDisabled

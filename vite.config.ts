@@ -20,13 +20,13 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png'],
         manifest: {
           id: normalizedBase,
-          name: 'Himalayan Breeze POS & Resort',
-          short_name: 'HB Breeze',
-          description: 'Billing POS, kitchen KOT, inventory tracking, resort rooms, and multi-device cloud sync.',
+          name: 'CAFe Host - Cafe, Restaurant & Resort POS',
+          short_name: 'CAFe Host',
+          description: 'CAFe Host billing POS, kitchen KOT, inventory tracking, resort rooms, and multi-device cloud sync.',
           lang: 'en',
           dir: 'ltr',
-          theme_color: '#0f172a',
-          background_color: '#0f172a',
+          theme_color: '#111827',
+          background_color: '#111827',
           display: 'standalone',
           orientation: 'any',
           categories: ['business', 'food', 'productivity'],
@@ -57,6 +57,9 @@ export default defineConfig(() => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
           navigateFallbackDenylist: [/^\/__/, /^\/api/],
           runtimeCaching: [
             {

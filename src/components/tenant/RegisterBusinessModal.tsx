@@ -13,21 +13,32 @@ import {
   ShieldCheck,
   AlertCircle
 } from 'lucide-react';
-import { AppModule, BusinessTenant, BusinessType, StaffRole } from '../../types';
-import { ALL_APP_MODULES, DEFAULT_MODULES_BY_TYPE } from '../../services/tenantStorage';
+import { AppModule, AppState, BusinessTenant, BusinessType, StaffRole } from '../../types';
+import {
+  ALL_APP_MODULES,
+  DEFAULT_MODULES_BY_TYPE,
+  canActorCreateBusiness,
+  registerNewBusiness
+} from '../../services/tenantStorage';
 
 interface RegisterBusinessModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onRegisterSuccess: (business: BusinessTenant) => void;
-  currentUser?: { id: string; name: string; role: StaffRole } | null;
+  onRegisterSuccess: (business: BusinessTenant, initialState?: AppState) => void;
+  currentUser?: { id: string; name: string; role: StaffRole; businessId?: string } | null;
+  isMasterOwner?: boolean;
+  canCreateBusiness?: boolean;
+  blockedReason?: string;
 }
 
 export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
   isOpen,
   onClose,
   onRegisterSuccess,
-  currentUser
+  currentUser,
+  isMasterOwner = false,
+  canCreateBusiness,
+  blockedReason
 }) => {
   const [businessName, setBusinessName] = useState('');
   const [nepaliBusinessName, setNepaliBusinessName] = useState('');
@@ -76,8 +87,24 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
     business_admin: { name: 'Business Admin & Governance', desc: 'Owner dashboard, roles, payments, taxes & staff' }
   };
 
+  const fallbackEligibility = canActorCreateBusiness({
+    id: currentUser?.id,
+    role: currentUser?.role,
+    isAppCreator: isMasterOwner,
+    businessId: currentUser?.businessId
+  });
+  const isCreationAllowed = canCreateBusiness !== undefined ? canCreateBusiness : fallbackEligibility.allowed;
+  const effectiveBlockedReason =
+    blockedReason ||
+    fallbackEligibility.reason ||
+    'Single-Business Policy: Only one business workspace is allowed per account.';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isCreationAllowed) {
+      setError(effectiveBlockedReason);
+      return;
+    }
     if (!businessName.trim()) {
       setError('Business Name is required.');
       return;
@@ -92,28 +119,28 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
     }
 
     try {
-      // Dynamic import to avoid circular dependency
-      import('../../services/tenantStorage').then(({ registerNewBusiness }) => {
-        const { business } = registerNewBusiness({
-          businessName: businessName.trim(),
-          nepaliBusinessName: nepaliBusinessName.trim() || undefined,
-          tagline: tagline.trim() || undefined,
-          businessType,
-          phone: phone.trim(),
-          email: email.trim() || 'contact@' + businessName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com',
-          address: address.trim(),
-          panVatNumber: panVatNumber.trim() || '600000000',
-          logo: logo.trim() || undefined,
-          ownerId: currentUser?.id || 'owner-' + Date.now().toString(36),
-          ownerName: currentUser?.name || 'Business Owner',
-          enabledModules,
-          environment,
-          templateType
-        });
-
-        onRegisterSuccess(business);
-        onClose();
+      const { business, state } = registerNewBusiness({
+        businessName: businessName.trim(),
+        nepaliBusinessName: nepaliBusinessName.trim() || undefined,
+        tagline: tagline.trim() || undefined,
+        businessType,
+        phone: phone.trim(),
+        email: email.trim() || 'contact@' + businessName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com',
+        address: address.trim(),
+        panVatNumber: panVatNumber.trim() || '600000000',
+        logo: logo.trim() || undefined,
+        ownerId: currentUser?.id || 'owner-' + Date.now().toString(36),
+        ownerName: currentUser?.name || 'Business Owner',
+        enabledModules,
+        environment,
+        templateType,
+        enforceSingleBusinessCap: true,
+        actorRole: currentUser?.role || 'OWNER',
+        isMasterOwner
       });
+
+      onRegisterSuccess(business, state);
+      onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to create business.');
     }
@@ -146,6 +173,26 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
           </button>
         </div>
 
+        {!isCreationAllowed ? (
+          <div className="p-6 space-y-4">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-xs text-amber-950">
+              <ShieldCheck className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-sm">Single-Business Workspace Limit</p>
+                <p className="leading-relaxed">{effectiveBlockedReason}</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-700">
@@ -461,6 +508,7 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
             </div>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

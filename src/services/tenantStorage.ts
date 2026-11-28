@@ -32,11 +32,13 @@ import {
 } from './storage';
 import { createStaffAccount } from './security';
 import { createCleanChartOfAccounts, ensureDefaultChartAccounts } from './accounting';
+import { isMasterOwnerEmail, redactProtectedEmail } from './cloudSyncService';
 
 export const BUSINESSES_REGISTRY_KEY = 'hb_businesses_registry_v1';
 export const MEMBERSHIPS_REGISTRY_KEY = 'hb_memberships_registry_v1';
 export const ACTIVE_BUSINESS_ID_KEY = 'hb_active_business_id';
 export const TENANT_STORAGE_PREFIX = 'hb_tenant_data_';
+export const OWNER_BUSINESS_CLAIM_KEY = 'hb_owner_created_business_map_v1';
 
 export const ALL_APP_MODULES: AppModule[] = [
   'pos', 
@@ -247,8 +249,14 @@ export function getRegisteredBusinesses(): BusinessTenant[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Filter out any explicitly deleted businesses
-        const filtered = parsed.filter((b: any) => !deletedIds.has(b.businessId));
+        // Filter out any explicitly deleted businesses and scrub protected super admin email
+        const filtered = parsed
+          .filter((b: any) => !deletedIds.has(b.businessId))
+          .map((b: BusinessTenant) => ({
+            ...b,
+            ownerName: isMasterOwnerEmail(b.ownerName) ? 'Client Owner' : b.ownerName,
+            email: redactProtectedEmail(b.email, '')
+          }));
         return filtered.length > 0 ? filtered : [INITIAL_BUSINESS_TENANTS[0]];
       }
     }
@@ -269,7 +277,12 @@ export function getRegisteredBusinesses(): BusinessTenant[] {
 export function saveRegisteredBusinesses(businesses: BusinessTenant[]) {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(BUSINESSES_REGISTRY_KEY, JSON.stringify(businesses));
+    const sanitized = businesses.map((b) => ({
+      ...b,
+      ownerName: isMasterOwnerEmail(b.ownerName) ? 'Client Owner' : b.ownerName,
+      email: redactProtectedEmail(b.email, '')
+    }));
+    localStorage.setItem(BUSINESSES_REGISTRY_KEY, JSON.stringify(sanitized));
   } catch (e) {
     console.error('Failed to save businesses registry', e);
   }
@@ -326,40 +339,172 @@ export function getActiveBusiness(): BusinessTenant {
   return businesses[0] || INITIAL_BUSINESS_TENANTS[0];
 }
 
+function getOwnerBusinessClaimMap(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(OWNER_BUSINESS_CLAIM_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function recordOwnerBusinessClaim(ownerId: string, businessId: string, email?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const map = getOwnerBusinessClaimMap();
+    if (ownerId) {
+      map[`uid:${ownerId.trim()}`] = businessId;
+    }
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (cleanEmail && !isMasterOwnerEmail(cleanEmail)) {
+      map[`email:${cleanEmail}`] = businessId;
+    }
+    localStorage.setItem(OWNER_BUSINESS_CLAIM_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage quota
+  }
+}
+
+export function getOwnedBusinessesForUser(
+  userId?: string | null,
+  email?: string | null,
+  currentBusinessId?: string | null
+): BusinessTenant[] {
+  const allBusinesses = getRegisteredBusinesses();
+  const memberships = getMemberships();
+  const ownedIds = new Set<string>();
+  const cleanUserId = (userId || '').trim();
+  const cleanEmail = (email || '').trim().toLowerCase();
+
+  if (cleanUserId) {
+    allBusinesses.forEach((b) => {
+      if (b.ownerId === cleanUserId) {
+        ownedIds.add(b.businessId);
+      }
+    });
+    memberships.forEach((m) => {
+      if (m.userId === cleanUserId && m.role === 'OWNER' && m.status === 'ACTIVE') {
+        ownedIds.add(m.businessId);
+      }
+    });
+  }
+
+  const claimMap = getOwnerBusinessClaimMap();
+  if (cleanUserId && claimMap[`uid:${cleanUserId}`]) {
+    ownedIds.add(claimMap[`uid:${cleanUserId}`]);
+  }
+  if (cleanEmail && !isMasterOwnerEmail(cleanEmail) && claimMap[`email:${cleanEmail}`]) {
+    ownedIds.add(claimMap[`email:${cleanEmail}`]);
+  }
+
+  // If currently inside a custom/production business workspace (not starter demo), treat it as an already-established business
+  if (currentBusinessId) {
+    const activeBiz = allBusinesses.find((b) => b.businessId === currentBusinessId);
+    if (activeBiz && (activeBiz.environment === 'production' || activeBiz.businessId !== 'biz-himalayan-breeze')) {
+      ownedIds.add(activeBiz.businessId);
+    }
+  }
+
+  return allBusinesses.filter((b) => ownedIds.has(b.businessId));
+}
+
+export function canActorCreateBusiness(actor?: {
+  id?: string | null;
+  role?: StaffRole;
+  email?: string | null;
+  isAppCreator?: boolean;
+  businessId?: string | null;
+} | null): { allowed: boolean; reason?: string; existingBusiness?: BusinessTenant } {
+  if (actor?.isAppCreator) {
+    return { allowed: true };
+  }
+  if (actor?.role === 'SUPER_ADMIN' && (!actor.email || isMasterOwnerEmail(actor.email))) {
+    return { allowed: true };
+  }
+  if (actor?.role && actor.role !== 'OWNER' && actor.role !== 'SUPER_ADMIN') {
+    return {
+      allowed: false,
+      reason: 'Staff accounts cannot create separate business workspaces. Only a new business owner or App Creator can register a business.'
+    };
+  }
+
+  const owned = getOwnedBusinessesForUser(actor?.id, actor?.email, actor?.businessId);
+  if (owned.length >= 1) {
+    return {
+      allowed: false,
+      existingBusiness: owned[0],
+      reason: `Single-Business Policy: Your account already owns "${owned[0].businessName}". Creating a second business is not allowed.`
+    };
+  }
+
+  return { allowed: true };
+}
+
 /**
  * Returns list of businesses that a user has permission to access.
  * If user role is SUPER_ADMIN, they have access to all registered businesses.
+ * Ordinary users (including OWNER/ADMIN/MANAGER/staff) only see their own authorized business.
  */
-export function getBusinessesForUser(userId: string, role?: StaffRole): BusinessTenant[] {
+export function getBusinessesForUser(
+  userId: string,
+  role?: StaffRole,
+  sessionBusinessId?: string
+): BusinessTenant[] {
   const allBusinesses = getRegisteredBusinesses();
   if (role === 'SUPER_ADMIN') {
     return allBusinesses;
   }
 
   const memberships = getMemberships();
-  const userMemberships = memberships.filter(m => (m.userId === userId || m.role === 'SUPER_ADMIN') && m.status === 'ACTIVE');
-  const allowedIds = new Set(userMemberships.map(m => m.businessId));
+  const userMemberships = memberships.filter(
+    (m) => m.userId === userId && m.status === 'ACTIVE'
+  );
+  const allowedIds = new Set<string>(userMemberships.map((m) => m.businessId));
 
   // If user is owner/creator of a business
-  allBusinesses.forEach(b => {
+  allBusinesses.forEach((b) => {
     if (b.ownerId === userId) {
       allowedIds.add(b.businessId);
     }
   });
 
-  // If user is admin or manager and no specific memberships exist yet, allow access to default business
-  if (allowedIds.size === 0) {
-    allowedIds.add('biz-himalayan-breeze');
+  if (sessionBusinessId && allBusinesses.some((b) => b.businessId === sessionBusinessId)) {
+    allowedIds.add(sessionBusinessId);
   }
 
-  return allBusinesses.filter(b => allowedIds.has(b.businessId));
+  // Strictly isolate: if no explicit membership matched, fall back ONLY to active business (never leak foreign tenants)
+  if (allowedIds.size === 0) {
+    const activeId = getActiveBusinessId();
+    if (allBusinesses.some((b) => b.businessId === activeId)) {
+      allowedIds.add(activeId);
+    } else if (allBusinesses[0]) {
+      allowedIds.add(allBusinesses[0].businessId);
+    }
+  }
+
+  return allBusinesses.filter((b) => allowedIds.has(b.businessId));
 }
 
-export function canUserAccessBusiness(user: { id: string; role?: StaffRole; businessId?: string }, businessId: string): boolean {
+export function canUserAccessBusiness(
+  user: { id: string; role?: StaffRole; businessId?: string },
+  businessId: string
+): boolean {
   if (user.role === 'SUPER_ADMIN') return true;
   if (user.businessId && user.businessId === businessId) return true;
-  const allowed = getBusinessesForUser(user.id, user.role);
-  return allowed.some(b => b.businessId === businessId);
+
+  const allBusinesses = getRegisteredBusinesses();
+  const targetBiz = allBusinesses.find((b) => b.businessId === businessId);
+  if (targetBiz && targetBiz.ownerId === user.id) return true;
+
+  const memberships = getMemberships();
+  return memberships.some(
+    (m) => m.userId === user.id && m.businessId === businessId && m.status === 'ACTIVE'
+  );
 }
 
 function ensureTenantDefaults(state: AppState, businessId: string): AppState {
@@ -431,6 +576,17 @@ function ensureTenantDefaults(state: AppState, businessId: string): AppState {
         status: 'OPEN'
       }
     ];
+  }
+  if (state.settings?.securitySettings && 'masterOwnerEmail' in state.settings.securitySettings) {
+    const { masterOwnerEmail: _dropped, ...restSec } = state.settings.securitySettings;
+    state.settings.securitySettings = restSec;
+  }
+  if (Array.isArray(state.staffUsers)) {
+    state.staffUsers = state.staffUsers.map((s) =>
+      s.role === 'SUPER_ADMIN' || isMasterOwnerEmail(s.email) || isMasterOwnerEmail(s.username)
+        ? { ...s, username: isMasterOwnerEmail(s.username) ? 'superadmin' : s.username, email: undefined }
+        : s
+    );
   }
   return { ...state, businessId };
 }
@@ -671,7 +827,24 @@ export function saveTenantAppState(businessId: string, state: AppState): boolean
     }
 
     const tenantKey = TENANT_STORAGE_PREFIX + businessId;
-    const cleanState = { ...state, businessId };
+    const sanitizedSecurity = state.settings?.securitySettings
+      ? (() => {
+          const { masterOwnerEmail: _dropped, ...restSec } = state.settings.securitySettings;
+          return restSec;
+        })()
+      : state.settings?.securitySettings;
+    const cleanState: AppState = {
+      ...state,
+      businessId,
+      settings: state.settings ? { ...state.settings, securitySettings: sanitizedSecurity } : state.settings,
+      staffUsers: Array.isArray(state.staffUsers)
+        ? state.staffUsers.map((s) =>
+            s.role === 'SUPER_ADMIN' || isMasterOwnerEmail(s.email) || isMasterOwnerEmail(s.username)
+              ? { ...s, username: isMasterOwnerEmail(s.username) ? 'superadmin' : s.username, email: undefined }
+              : s
+          )
+        : state.staffUsers
+    };
     localStorage.setItem(tenantKey, JSON.stringify(cleanState));
     
     // Also sync to legacy key if it is default business for backward compatibility
@@ -704,7 +877,22 @@ export function registerNewBusiness(input: {
   enabledModules?: AppModule[];
   environment?: 'production' | 'demo';
   templateType?: 'starter' | 'clean_slate';
+  enforceSingleBusinessCap?: boolean;
+  actorRole?: StaffRole;
+  isMasterOwner?: boolean;
 }): { business: BusinessTenant; state: AppState } {
+  if (input.enforceSingleBusinessCap && !input.isMasterOwner) {
+    const eligibility = canActorCreateBusiness({
+      id: input.ownerId,
+      role: input.actorRole || 'OWNER',
+      email: input.email,
+      isAppCreator: input.isMasterOwner
+    });
+    if (!eligibility.allowed) {
+      throw new Error(eligibility.reason || 'Only one business workspace is allowed per account.');
+    }
+  }
+
   const businesses = getRegisteredBusinesses();
   const duplicate = businesses.find(b => b.businessName.toLowerCase().trim() === input.businessName.toLowerCase().trim());
   if (duplicate) {
@@ -790,7 +978,10 @@ export function registerNewBusiness(input: {
   }
   saveTenantAppState(businessId, initialState);
 
-  // 4. Set as active business
+  // 4. Record single-business owner claim (for non-Master accounts) and set as active business
+  if (!input.isMasterOwner) {
+    recordOwnerBusinessClaim(input.ownerId, businessId, input.email);
+  }
   setActiveBusinessId(businessId);
 
   return { business: newBusiness, state: initialState };
@@ -1188,6 +1379,8 @@ export function upsertSyncedCloudBusinesses(cloudList: CloudTenantMetaSummary[])
         ? meta.enabledModules
         : prev?.enabledModules || DEFAULT_MODULES_BY_TYPE[fallbackType] || ALL_APP_MODULES;
 
+    const safeOwnerEmail = redactProtectedEmail(meta.ownerEmail, '');
+
     if (prev) {
       byId.set(meta.businessId, {
         ...prev,
@@ -1198,7 +1391,8 @@ export function upsertSyncedCloudBusinesses(cloudList: CloudTenantMetaSummary[])
         status: nextStatus,
         enabledModules: nextModules,
         currencySymbol: meta.currencySymbol || prev.currencySymbol,
-        email: prev.email || meta.ownerEmail || prev.email,
+        ownerName: isMasterOwnerEmail(prev.ownerName) ? 'Client Owner' : prev.ownerName,
+        email: redactProtectedEmail(prev.email, '') || safeOwnerEmail || '',
         updatedAt: today
       });
     } else {
@@ -1209,9 +1403,9 @@ export function upsertSyncedCloudBusinesses(cloudList: CloudTenantMetaSummary[])
         tagline: meta.tagline || 'Cloud-Synced Client Workspace',
         businessType: fallbackType,
         ownerId: meta.ownerUid || 'cloud-owner',
-        ownerName: meta.ownerEmail || 'Client Owner',
+        ownerName: safeOwnerEmail || 'Client Owner',
         phone: '',
-        email: meta.ownerEmail || '',
+        email: safeOwnerEmail,
         address: 'Cloud Tenant',
         panVatNumber: '',
         status: nextStatus,

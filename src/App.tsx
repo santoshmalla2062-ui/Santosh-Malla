@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   auth,
+  consumeGoogleRedirectResult,
   formatFirebaseAuthError,
   registerWithEmailPassword,
+  reloadFirebaseUser,
   sendPasswordReset,
   sendUserEmailVerification,
   signInWithEmailPassword,
@@ -38,6 +40,9 @@ import {
 } from './services/storage';
 import { 
   acceptStaffInvitation,
+  canActorCreateBusiness,
+  canUserAccessBusiness,
+  getBusinessesForUser,
   getRegisteredBusinesses, 
   getActiveBusinessId, 
   setActiveBusinessId, 
@@ -75,15 +80,17 @@ import {
   bootstrapMasterOwnerWorkspace,
   canFreeSwitchRoles,
   canRoleWriteChannel,
+  deleteStaffAccountFromCloud,
   extractChannelPayload,
   fetchOlderShardedOrdersPage,
+  getStaffAccountSyncFingerprint,
   isMasterOwnerEmail,
   isMasterOwnerUser,
   isValidFirestoreId,
   listAllCloudBusinessesForCreator,
-  MASTER_OWNER_EMAIL,
   mergeChannelPayloadIntoAppState,
   pushSyncChannelToCloud,
+  registerBusinessInCloud,
   reserveAtomicSequenceNumber,
   resolveCloudMemberAccess,
   subscribeToBusinessCloudChannels,
@@ -91,6 +98,7 @@ import {
   syncCreditNoteToCloud,
   syncJournalEntryToCloud,
   syncOrderDocumentToCloud,
+  syncStaffAccountToCloud,
   updateCloudBusinessPolicy
 } from './services/cloudSyncService';
 import {
@@ -161,13 +169,21 @@ import { SyncResilienceTestModal } from './components/admin/SyncResilienceTestMo
 import { ShieldAlert, X } from 'lucide-react';
 
 export default function App() {
-  // Multi-Business / Multi-Tenant State (honors ?biz=<businessId> invite deep link on fresh devices)
+  // Multi-Business / Multi-Tenant State (honors ?biz=<businessId> invite deep link only when unauthenticated or authorized)
   const [businesses, setBusinesses] = useState<BusinessTenant[]>(() => {
     const initialList = getRegisteredBusinesses();
+    const existingSess = getCurrentSession();
     if (typeof window !== 'undefined') {
       try {
         const bizParam = new URLSearchParams(window.location.search).get('biz')?.trim();
-        if (bizParam && isValidFirestoreId(bizParam) && !initialList.some(b => b.businessId === bizParam)) {
+        const canHonorParam =
+          !existingSess ||
+          existingSess.role === 'SUPER_ADMIN' ||
+          canUserAccessBusiness(
+            { id: existingSess.staffId, role: existingSess.role, businessId: existingSess.businessId },
+            bizParam || ''
+          );
+        if (bizParam && canHonorParam && isValidFirestoreId(bizParam) && !initialList.some(b => b.businessId === bizParam)) {
           return upsertSyncedCloudBusinesses([{ businessId: bizParam, businessName: 'Cloud Workspace' }]);
         }
       } catch {
@@ -177,16 +193,28 @@ export default function App() {
     return initialList;
   });
   const [activeBusinessId, setActiveBusinessIdState] = useState<string>(() => {
+    const existingSess = getCurrentSession();
     if (typeof window !== 'undefined') {
       try {
         const bizParam = new URLSearchParams(window.location.search).get('biz')?.trim();
-        if (bizParam && isValidFirestoreId(bizParam)) {
+        const canHonorParam =
+          !existingSess ||
+          existingSess.role === 'SUPER_ADMIN' ||
+          canUserAccessBusiness(
+            { id: existingSess.staffId, role: existingSess.role, businessId: existingSess.businessId },
+            bizParam || ''
+          );
+        if (bizParam && canHonorParam && isValidFirestoreId(bizParam)) {
           setActiveBusinessId(bizParam);
           return bizParam;
         }
       } catch {
         // Ignore URL parsing issues
       }
+    }
+    if (existingSess && existingSess.role !== 'SUPER_ADMIN' && existingSess.businessId) {
+      setActiveBusinessId(existingSess.businessId);
+      return existingSess.businessId;
     }
     return getActiveBusinessId();
   });
@@ -309,6 +337,9 @@ export default function App() {
   const cloudCreditNoteIdsRef = useRef<Set<string>>(new Set());
   const cloudJournalIdsRef = useRef<Set<string>>(new Set());
   const cloudAuditIdsRef = useRef<Set<string>>(new Set());
+  const cloudStaffIdsRef = useRef<Set<string>>(new Set());
+  const cloudStaffFingerprintRef = useRef<Map<string, string>>(new Map());
+  const hasLoadedCloudStaffRef = useRef<string | null>(null);
   const hasBackfilledBusinessRef = useRef<string | null>(null);
   const appStateRef = useRef<AppState>(appState);
   appStateRef.current = appState;
@@ -317,6 +348,10 @@ export default function App() {
 
   const ownerControlLocked = appState.settings?.securitySettings?.ownerControlLocked !== false;
   const isMasterOwnerGoogle = useMemo(() => isMasterOwnerUser(firebaseUser), [firebaseUser]);
+  const safeCloudUserEmail = useMemo(
+    () => (firebaseUser?.email && !isMasterOwnerEmail(firebaseUser.email) ? firebaseUser.email : null),
+    [firebaseUser?.email]
+  );
   const isBusinessOwnerGoogle = useMemo(
     () =>
       cloudAccess?.status === 'MASTER_OWNER' ||
@@ -334,6 +369,34 @@ export default function App() {
       }),
     [currentSession?.role, ownerControlLocked, isMasterOwnerGoogle, isBusinessOwnerGoogle]
   );
+
+  // Strictly scope visible/switchable businesses so regular users NEVER see or open other businesses
+  const accessibleBusinesses = useMemo(() => {
+    if (currentSession?.role === 'SUPER_ADMIN' || isMasterOwnerGoogle) {
+      return businesses;
+    }
+    if (!currentSession) {
+      return [activeBusiness];
+    }
+    return getBusinessesForUser(currentSession.staffId, currentSession.role, activeBusiness.businessId);
+  }, [businesses, currentSession, isMasterOwnerGoogle, activeBusiness]);
+
+  const businessCreationEligibility = useMemo(
+    () =>
+      canActorCreateBusiness({
+        id: firebaseUser?.uid || currentSession?.staffId,
+        role: currentSession?.role,
+        email: firebaseUser?.email,
+        isAppCreator: isMasterOwnerGoogle,
+        businessId: activeBusiness.businessId
+      }),
+    [firebaseUser?.uid, firebaseUser?.email, currentSession?.staffId, currentSession?.role, isMasterOwnerGoogle, activeBusiness.businessId, businesses]
+  );
+
+  const canOpenBusinessSwitcher = useMemo(() => {
+    if (currentSession?.role === 'SUPER_ADMIN' || isMasterOwnerGoogle) return true;
+    return accessibleBusinesses.length > 1 || businessCreationEligibility.allowed;
+  }, [currentSession?.role, isMasterOwnerGoogle, accessibleBusinesses.length, businessCreationEligibility.allowed]);
   const [notifications, setNotifications] = useState<AppNotification[]>(() => 
     getConsolidatedNotifications(loadTenantAppState(activeBusinessId), activeBusinessId)
   );
@@ -528,8 +591,18 @@ export default function App() {
     recordAudit('STAFF_ROLE_SWITCHED', matchingStaff.id, `Workspace switched to ${newRole} (Home: ${home.defaultTab})`, 'INFO');
   }, [userCanFreeSwitchRoles, appState.staffUsers, activeBusiness.businessId, activeBusiness.enabledModules, playChime, recordAudit]);
 
-  // Listen to Firebase Auth state changes
+  const languageRef = useRef<Language>(language);
+  languageRef.current = language;
+
+  // Listen to Firebase Auth state changes & process any mobile redirect result
   useEffect(() => {
+    consumeGoogleRedirectResult().then(({ error }) => {
+      if (error) {
+        const msg = formatFirebaseAuthError(error, languageRef.current);
+        setCloudAuthError(msg);
+        setSecurityAlert(msg);
+      }
+    });
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setIsFirebaseAuthReady(true);
@@ -544,20 +617,24 @@ export default function App() {
     explicitGoogleSignInRef.current = true;
     try {
       const signedInUser = await signInWithGooglePopup();
+      if (!signedInUser) {
+        // Mobile standalone browser fell back to Google redirect flow
+        return;
+      }
       // If Firebase cached the same UID (e.g. re-authenticating back to Owner from a locked Waiter terminal),
       // onAuthStateChanged may not re-fire, so restore verified Owner/Creator/Authorized session explicitly.
-      if (signedInUser && firebaseUser?.uid === signedInUser.uid) {
+      if (firebaseUser?.uid === signedInUser.uid) {
         if (isMasterOwnerUser(signedInUser)) {
           const creatorStaff: StaffUser = {
             id: signedInUser.uid,
-            username: signedInUser.email || 'creator',
-            name: signedInUser.displayName || 'App Creator',
-            nepaliName: 'एप क्रिएटर (App Creator)',
+            username: 'superadmin',
+            name: 'Super Admin',
+            nepaliName: 'सुपर एडमिन (Super Admin)',
             role: 'SUPER_ADMIN',
             pinHash: '',
             salt: 'google-oauth',
             isActive: true,
-            email: signedInUser.email || undefined,
+            email: undefined,
             businessId: activeBusiness.businessId,
             createdAt: new Date().toISOString().split('T')[0]
           };
@@ -590,13 +667,13 @@ export default function App() {
       }
     } catch (err: any) {
       explicitGoogleSignInRef.current = false;
-      const msg = err?.message || 'Google Sign-In failed or was cancelled.';
+      const msg = formatFirebaseAuthError(err, language);
       setCloudAuthError(msg);
       setSecurityAlert(msg);
     } finally {
       setIsGoogleAuthLoading(false);
     }
-  }, [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess]);
+  }, [firebaseUser?.uid, activeBusiness.businessId, activeBusiness.enabledModules, cloudAccess, language]);
 
   const handleEmailPasswordSignIn = useCallback(
     async (
@@ -616,7 +693,14 @@ export default function App() {
         } catch {
           // Ignore storage quota issues
         }
-        const signedInUser = await signInWithEmailPassword(email, password, rememberMe);
+        let signedInUser = await signInWithEmailPassword(email, password, rememberMe);
+        if (!signedInUser.emailVerified) {
+          try {
+            signedInUser = await reloadFirebaseUser(signedInUser);
+          } catch {
+            // Keep existing user object if refresh fails
+          }
+        }
         if (!signedInUser.emailVerified) {
           try {
             await sendUserEmailVerification(signedInUser);
@@ -625,10 +709,11 @@ export default function App() {
           }
           await signOutFirebase();
           explicitGoogleSignInRef.current = false;
+          const maskedEmail = isMasterOwnerEmail(signedInUser.email) ? 'your account' : signedInUser.email;
           const verifyMsg =
             language === 'ne'
-              ? `तपाईंको इमेल (${signedInUser.email}) अझै प्रमाणित (Verified) भएको छैन। इनबक्समा पठाइएको Verification लिंक क्लिक गरेर पुनः लग-इन गर्नुहोस्।`
-              : `Email (${signedInUser.email}) is not verified yet. We sent a verification link to your inbox — click it, then tap Log in.`;
+              ? `तपाईंको इमेल (${maskedEmail}) अझै प्रमाणित (Verified) भएको छैन। इनबक्समा पठाइएको Verification लिंक क्लिक गरेर पुनः लग-इन गर्नुहोस्।`
+              : `Email (${maskedEmail}) is not verified yet. We sent a verification link to your inbox — click it, then tap Log in.`;
           setCloudAuthError(verifyMsg);
           return { success: false, error: verifyMsg };
         }
@@ -637,14 +722,14 @@ export default function App() {
           if (isMasterOwnerUser(signedInUser)) {
             const creatorStaff: StaffUser = {
               id: signedInUser.uid,
-              username: signedInUser.email || 'creator',
-              name: signedInUser.displayName || 'App Creator',
-              nepaliName: 'एप क्रिएटर (App Creator)',
+              username: 'superadmin',
+              name: 'Super Admin',
+              nepaliName: 'सुपर एडमिन (Super Admin)',
               role: 'SUPER_ADMIN',
               pinHash: '',
               salt: 'email-auth',
               isActive: true,
-              email: signedInUser.email || undefined,
+              email: undefined,
               businessId: activeBusiness.businessId,
               createdAt: new Date().toISOString().split('T')[0]
             };
@@ -707,12 +792,13 @@ export default function App() {
         const createdUser = await registerWithEmailPassword(email, password, rememberMe, fullName);
         // Firestore rules enforce verified email; sign out cleanly until staff taps inbox link
         await signOutFirebase();
+        const safeCreatedLabel = isMasterOwnerEmail(createdUser.email) ? 'your account' : createdUser.email;
         return {
           success: true,
           message:
             language === 'ne'
-              ? `${createdUser.email} मा खाता बन्यो र Verification लिंक पठाइयो! इनबक्सको लिंक क्लिक गरेर सिधै "Log in" थिच्नुहोस्।`
-              : `Account created for ${createdUser.email}! Click the verification link sent to your inbox, then tap Log in.`
+              ? `${safeCreatedLabel} मा खाता बन्यो र Verification लिंक पठाइयो! इनबक्सको लिंक क्लिक गरेर सिधै "Log in" थिच्नुहोस्।`
+              : `Account created for ${safeCreatedLabel}! Click the verification link sent to your inbox, then tap Log in.`
         };
       } catch (err) {
         const msg = formatFirebaseAuthError(err, language);
@@ -772,6 +858,9 @@ export default function App() {
     cloudCreditNoteIdsRef.current = new Set();
     cloudJournalIdsRef.current = new Set();
     cloudAuditIdsRef.current = new Set();
+    cloudStaffIdsRef.current = new Set();
+    cloudStaffFingerprintRef.current = new Map();
+    hasLoadedCloudStaffRef.current = null;
 
     if (!isFirebaseAuthReady) return;
     if (!firebaseUser) {
@@ -786,7 +875,15 @@ export default function App() {
       setCloudSyncStatus('connecting');
       setCloudAuthError(null);
       try {
-        const res = await resolveCloudMemberAccess(firebaseUser, activeBusiness.businessId);
+        const candidateBizIds = Array.from(
+          new Set([
+            ...businesses.map((b) => b.businessId),
+            ...INITIAL_BUSINESS_TENANTS.map((b) => b.businessId)
+          ])
+        );
+        const res = await resolveCloudMemberAccess(firebaseUser, activeBusiness.businessId, {
+          candidateBusinessIds: candidateBizIds
+        });
         if (cancelled) return;
 
         if (res.status === 'REVOKED' || res.status === 'UNAUTHORIZED') {
@@ -800,6 +897,31 @@ export default function App() {
           setCloudAuthError(res.reason);
           setSecurityAlert(res.reason);
           await signOutFirebase();
+          return;
+        }
+
+        // Automatically switch fresh mobile installs to the user's discovered authorized business workspace
+        if (res.status === 'AUTHORIZED' && res.businessId && res.businessId !== activeBusiness.businessId) {
+          const discoveredId = res.businessId;
+          const metaPatch = res.businessMeta
+            ? [
+                {
+                  businessId: discoveredId,
+                  businessName: res.businessMeta.businessName,
+                  nepaliBusinessName: res.businessMeta.nepaliBusinessName,
+                  businessType: res.businessMeta.businessType,
+                  status: res.businessMeta.status === 'SUSPENDED' ? ('SUSPENDED' as const) : ('ACTIVE' as const),
+                  enabledModules: res.businessMeta.enabledModules,
+                  currencySymbol: res.businessMeta.currencySymbol
+                }
+              ]
+            : [{ businessId: discoveredId, businessName: 'Cloud Workspace' }];
+          const updatedBusinesses = upsertSyncedCloudBusinesses(metaPatch);
+          setBusinesses(updatedBusinesses);
+          saveTenantAppState(activeBusiness.businessId, appStateRef.current);
+          setActiveBusinessId(discoveredId);
+          setActiveBusinessIdState(discoveredId);
+          setAppState(loadTenantAppState(discoveredId));
           return;
         }
 
@@ -843,7 +965,7 @@ export default function App() {
                     strictTenantDataIsolation: merged.settings.securitySettings?.strictTenantDataIsolation ?? true,
                     allowSuperAdminAuditInspect: merged.settings.securitySettings?.allowSuperAdminAuditInspect ?? true,
                     ownerControlLocked: boot.businessMeta.ownerControlLocked !== false,
-                    masterOwnerEmail: MASTER_OWNER_EMAIL
+                    masterOwnerEmail: undefined
                   }
                 }
               };
@@ -875,14 +997,14 @@ export default function App() {
           if (!activeSess || forceOwnerSession) {
             const creatorStaff: StaffUser = {
               id: firebaseUser.uid,
-              username: res.email,
-              name: firebaseUser.displayName || 'App Creator',
-              nepaliName: 'एप क्रिएटर (App Creator)',
+              username: 'superadmin',
+              name: 'Super Admin',
+              nepaliName: 'सुपर एडमिन (Super Admin)',
               role: 'SUPER_ADMIN',
               pinHash: '',
               salt: 'google-oauth',
               isActive: true,
-              email: res.email,
+              email: undefined,
               businessId: activeBusiness.businessId,
               createdAt: new Date().toISOString().split('T')[0]
             };
@@ -926,9 +1048,13 @@ export default function App() {
             isApplyingRemoteSyncRef.current = true;
             setAppState((prev) => {
               const merged = mergeChannelPayloadIntoAppState(prev, channelId, data);
-              const normalized = extractChannelPayload(channelId, merged);
+              const nextState =
+                channelId === 'admin_controls' && hasLoadedCloudStaffRef.current === activeBusiness.businessId
+                  ? { ...merged, staffUsers: prev.staffUsers }
+                  : merged;
+              const normalized = extractChannelPayload(channelId, nextState);
               channelFingerprintRef.current[channelId] = JSON.stringify(normalized);
-              return merged;
+              return nextState;
             });
             setTimeout(() => {
               isApplyingRemoteSyncRef.current = false;
@@ -982,7 +1108,7 @@ export default function App() {
                   strictTenantDataIsolation: prev.settings.securitySettings?.strictTenantDataIsolation ?? true,
                   allowSuperAdminAuditInspect: prev.settings.securitySettings?.allowSuperAdminAuditInspect ?? true,
                   ownerControlLocked: meta.ownerControlLocked !== false,
-                  masterOwnerEmail: MASTER_OWNER_EMAIL
+                  masterOwnerEmail: undefined
                 }
               }
             }));
@@ -1090,6 +1216,26 @@ export default function App() {
             setTimeout(() => {
               isApplyingRemoteSyncRef.current = false;
             }, 250);
+          },
+          onStaffAccountsSnapshot: (cloudStaff) => {
+            const nextMap = new Map<string, string>();
+            const nextIds = new Set<string>();
+            for (const u of cloudStaff) {
+              nextIds.add(u.id);
+              nextMap.set(u.id, getStaffAccountSyncFingerprint(u));
+            }
+            cloudStaffIdsRef.current = nextIds;
+            cloudStaffFingerprintRef.current = nextMap;
+            hasLoadedCloudStaffRef.current = activeBusiness.businessId;
+
+            isApplyingRemoteSyncRef.current = true;
+            setAppState((prev) => ({
+              ...prev,
+              staffUsers: cloudStaff
+            }));
+            setTimeout(() => {
+              isApplyingRemoteSyncRef.current = false;
+            }, 250);
           }
         });
 
@@ -1119,10 +1265,30 @@ export default function App() {
               knownCloudOrderIds: cloudOrderIdsRef.current,
               knownCloudCreditNoteIds: cloudCreditNoteIdsRef.current,
               knownCloudJournalIds: cloudJournalIdsRef.current,
-              knownCloudAuditIds: cloudAuditIdsRef.current
-            }).catch((err) => {
-              console.warn('Sharded subcollection startup backfill warning:', err);
-            });
+              knownCloudAuditIds: cloudAuditIdsRef.current,
+              knownCloudStaffIds: cloudStaffIdsRef.current
+            })
+              .then(() => {
+                if (
+                  !cancelled &&
+                  (userIsOwnerOrMaster ||
+                    resolvedRoleForBackfill === 'ADMIN' ||
+                    resolvedRoleForBackfill === 'MANAGER')
+                ) {
+                  for (const s of appStateRef.current.staffUsers || []) {
+                    if (isValidFirestoreId(s.id) && (userIsOwnerOrMaster || s.role !== 'SUPER_ADMIN')) {
+                      if (!cloudStaffFingerprintRef.current.has(s.id)) {
+                        cloudStaffFingerprintRef.current.set(s.id, getStaffAccountSyncFingerprint(s));
+                      }
+                      cloudStaffIdsRef.current.add(s.id);
+                    }
+                  }
+                  hasLoadedCloudStaffRef.current = activeBusiness.businessId;
+                }
+              })
+              .catch((err) => {
+                console.warn('Sharded subcollection startup backfill warning:', err);
+              });
           }, 1500);
         }
 
@@ -1245,6 +1411,60 @@ export default function App() {
   }, [
     appState.journalEntries,
     appState.auditLogs,
+    appState.businessId,
+    cloudSyncStatus,
+    firebaseUser,
+    cloudOwnerUid,
+    cloudAccess,
+    activeBusiness.businessId,
+    currentSession?.role,
+    isOwnerOrMaster
+  ]);
+
+  // Incrementally sync Staff Accounts (add, profile edit, PIN change, remove) across Owner, Admin & Manager devices
+  useEffect(() => {
+    if (cloudSyncStatus !== 'connected' || !firebaseUser || !cloudOwnerUid || !cloudAccess) return;
+    if (isApplyingRemoteSyncRef.current || !canPushCloudChannelsRef.current) return;
+    if (hasLoadedCloudStaffRef.current !== activeBusiness.businessId) return;
+    if (appState.businessId && appState.businessId !== activeBusiness.businessId) return;
+
+    const effectiveRole: StaffRole =
+      currentSession?.role ||
+      (cloudAccess.status === 'AUTHORIZED' ? cloudAccess.role : 'OWNER');
+    if (!isOwnerOrMaster && effectiveRole !== 'ADMIN' && effectiveRole !== 'MANAGER') return;
+
+    const currentUsers = appState.staffUsers || [];
+    const currentIds = new Set(currentUsers.map((u) => u.id));
+
+    for (const staff of currentUsers) {
+      if (!isValidFirestoreId(staff.id)) continue;
+      if (!isOwnerOrMaster && staff.role === 'SUPER_ADMIN') continue;
+      const fp = getStaffAccountSyncFingerprint(staff);
+      if (cloudStaffFingerprintRef.current.get(staff.id) !== fp) {
+        cloudStaffFingerprintRef.current.set(staff.id, fp);
+        cloudStaffIdsRef.current.add(staff.id);
+        syncStaffAccountToCloud({
+          staff,
+          businessId: activeBusiness.businessId,
+          ownerUid: cloudOwnerUid,
+          userUid: firebaseUser.uid,
+          isOwnerOrMaster
+        }).catch((err) => console.warn('Staff account cloud sync warning:', err));
+      }
+    }
+
+    for (const prevId of Array.from(cloudStaffFingerprintRef.current.keys())) {
+      if (!currentIds.has(prevId)) {
+        cloudStaffFingerprintRef.current.delete(prevId);
+        cloudStaffIdsRef.current.delete(prevId);
+        deleteStaffAccountFromCloud({
+          businessId: activeBusiness.businessId,
+          staffId: prevId
+        }).catch((err) => console.warn('Staff account cloud delete warning:', err));
+      }
+    }
+  }, [
+    appState.staffUsers,
     appState.businessId,
     cloudSyncStatus,
     firebaseUser,
@@ -1492,9 +1712,44 @@ export default function App() {
     };
   }, [activeBusiness.businessId, playChime]);
 
-  // Business Switcher Handler (Strict Data Partitioning & State Swap)
-  const handleSwitchBusiness = (newBusinessId: string) => {
+  // Business Switcher Handler (Strict Data Partitioning, Tenant Isolation & State Swap)
+  const handleSwitchBusiness = (
+    newBusinessId: string,
+    options?: { allowJustCreatedBusinessId?: string }
+  ) => {
     if (newBusinessId === activeBusinessId) return;
+
+    const isJustCreated = options?.allowJustCreatedBusinessId === newBusinessId;
+    const isSuperAdmin = currentSession?.role === 'SUPER_ADMIN' || isMasterOwnerGoogle;
+    const hasLocalAccess = currentSession
+      ? canUserAccessBusiness(
+          { id: currentSession.staffId, role: currentSession.role, businessId: currentSession.businessId },
+          newBusinessId
+        )
+      : false;
+    const blockedByCloudTenantScope =
+      Boolean(firebaseUser) &&
+      !isMasterOwnerGoogle &&
+      cloudAccess?.status === 'AUTHORIZED' &&
+      Boolean(cloudAccess.businessId) &&
+      cloudAccess.businessId !== newBusinessId &&
+      !isJustCreated;
+
+    if (!isSuperAdmin && !isJustCreated && (!hasLocalAccess || blockedByCloudTenantScope)) {
+      recordAudit(
+        'UNAUTHORIZED_TENANT_SWITCH_BLOCKED',
+        newBusinessId,
+        `Blocked unauthorized attempt by ${currentSession?.name || 'User'} (${currentSession?.role || 'UNKNOWN'}) to access foreign workspace ${newBusinessId}`,
+        'CRITICAL'
+      );
+      setSecurityAlert(
+        language === 'ne'
+          ? 'पहुँच अस्वीकृत: तपाईंलाई अरूको व्यवसाय (Business) मा प्रवेश गर्ने अनुमति छैन।'
+          : 'Access Denied: You are not authorized to open or switch into another business workspace.'
+      );
+      playChime('alert');
+      return;
+    }
 
     // 1. Immediately persist current tenant state
     saveTenantAppState(activeBusiness.businessId, appState);
@@ -1520,7 +1775,7 @@ export default function App() {
     }
 
     // 6. Ensure active tab is allowed in target business
-    const targetBusiness = businesses.find(b => b.businessId === newBusinessId);
+    const targetBusiness = getRegisteredBusinesses().find(b => b.businessId === newBusinessId);
     const enabledMods = targetBusiness?.enabledModules || [];
     if (!isTabPermittedForRole(activeTab, currentSession?.role, enabledMods)) {
       setActiveTab('pos');
@@ -1531,13 +1786,61 @@ export default function App() {
   };
 
   // Register New Business Success Handler
-  const handleRegisterBusinessSuccess = (newBusiness: BusinessTenant) => {
+  const handleRegisterBusinessSuccess = (newBusiness: BusinessTenant, initialState?: AppState) => {
     const updated = getRegisteredBusinesses();
     setBusinesses(updated);
-    handleSwitchBusiness(newBusiness.businessId);
+    handleSwitchBusiness(newBusiness.businessId, { allowJustCreatedBusinessId: newBusiness.businessId });
+
+    if (firebaseUser && firebaseUser.emailVerified && cloudSyncStatus === 'connected') {
+      const stateToSync = initialState || loadTenantAppState(newBusiness.businessId);
+      registerBusinessInCloud(firebaseUser, newBusiness, stateToSync).catch((err) => {
+        console.warn('Cloud business registration warning:', err);
+      });
+    }
+
     setSecurityAlert(`Success! New workspace for "${newBusiness.businessName}" is now active and ready.`);
     playChime('success');
   };
+
+  const handleOpenRegisterBusiness = useCallback(() => {
+    if (!businessCreationEligibility.allowed) {
+      recordAudit(
+        'SECOND_BUSINESS_CREATION_BLOCKED',
+        currentSession?.staffId,
+        businessCreationEligibility.reason || 'Blocked creating second business workspace',
+        'WARNING'
+      );
+      setSecurityAlert(
+        businessCreationEligibility.reason ||
+          (language === 'ne'
+            ? 'एउटा खाताबाट केवल एउटा मात्र व्यवसाय (Business) बनाउन मिल्छ।'
+            : 'Single-Business Policy: Only one business workspace is allowed per account.')
+      );
+      playChime('alert');
+      return;
+    }
+    setShowRegisterBusinessModal(true);
+  }, [businessCreationEligibility, currentSession?.staffId, language, playChime, recordAudit]);
+
+  const handleOpenSetupWizard = useCallback(() => {
+    if (!businessCreationEligibility.allowed) {
+      recordAudit(
+        'SECOND_BUSINESS_WIZARD_BLOCKED',
+        currentSession?.staffId,
+        businessCreationEligibility.reason || 'Blocked setup wizard for additional business',
+        'WARNING'
+      );
+      setSecurityAlert(
+        businessCreationEligibility.reason ||
+          (language === 'ne'
+            ? 'एउटा खाताबाट केवल एउटा मात्र व्यवसाय (Business) बनाउन मिल्छ।'
+            : 'Single-Business Policy: Your account already manages a business workspace.')
+      );
+      playChime('alert');
+      return;
+    }
+    setShowSetupWizardModal(true);
+  }, [businessCreationEligibility, currentSession?.staffId, language, playChime, recordAudit]);
 
   // Refresh all cloud client businesses for the App Creator Hub
   const handleRefreshCreatorCloudBusinesses = async () => {
@@ -1591,8 +1894,13 @@ export default function App() {
     }
   };
 
-  // Delete Business Handler
+  // Delete Business Handler (Super Admin / App Creator multi-tenant action only)
   const handleDeleteBusiness = (bizId: string) => {
+    if (currentSession?.role !== 'SUPER_ADMIN' && !isMasterOwnerGoogle) {
+      setSecurityAlert('Only the App Creator / Super Admin can remove business workspaces.');
+      playChime('alert');
+      return;
+    }
     if (businesses.length <= 1) {
       setSecurityAlert('Cannot delete the only existing business workspace.');
       return;
@@ -3518,39 +3826,91 @@ export default function App() {
 
   const handleUpdateSettings = (newSettings: BusinessSettings) => {
     const userRole = currentSession?.role;
-    if (userRole !== 'OWNER' && userRole !== 'SUPER_ADMIN' && userRole !== 'ADMIN') {
-      recordAudit('UNAUTHORIZED_CONFIG_MODIFICATION_BLOCKED', undefined, 'Non-admin attempted to update business profile/taxes', 'CRITICAL');
-      setSecurityAlert('Permission Denied: Only Owner or Administrator can update establishment profiles or billing tax rates.');
+    const isFullAdmin = userRole === 'OWNER' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
+    const canModifyTax = userRole ? hasPermission(userRole, 'MODIFY_TAX_CONFIG') : false;
+    const canManagePayments = userRole ? hasPermission(userRole, 'MANAGE_PAYMENT_METHODS') : false;
+    const canManageProfile = userRole ? hasPermission(userRole, 'MANAGE_BUSINESS_PROFILE') : false;
+
+    if (!isFullAdmin && !canModifyTax && !canManagePayments) {
+      recordAudit('UNAUTHORIZED_CONFIG_MODIFICATION_BLOCKED', undefined, 'Unauthorized role attempted to update business taxes or payment configuration', 'CRITICAL');
+      setSecurityAlert('Permission Denied: Only Owner, Administrator, or Manager can update billing tax rates or payment settings.');
       playChime('alert');
       return;
     }
 
     const cleanLogoUrl = 'logoUrl' in newSettings ? sanitizeBusinessLogoUrl(newSettings.logoUrl) : undefined;
-    const sanitizedSettings: BusinessSettings =
+    const rawSanitized: BusinessSettings =
       'logoUrl' in newSettings
         ? { ...newSettings, logoUrl: cleanLogoUrl }
         : newSettings;
 
-    setAppState(prev => ({
-      ...prev,
-      settings: sanitizedSettings
-    }));
+    setAppState(prev => {
+      const nextSettings: BusinessSettings = isFullAdmin || canManageProfile
+        ? rawSanitized
+        : {
+            ...prev.settings,
+            ...(canModifyTax
+              ? {
+                  enableVat: rawSanitized.enableVat,
+                  vatRatePercent: rawSanitized.vatRatePercent,
+                  enableServiceCharge: rawSanitized.enableServiceCharge,
+                  serviceChargePercent: rawSanitized.serviceChargePercent,
+                  currencySymbol: rawSanitized.currencySymbol,
+                  panVatNumber: rawSanitized.panVatNumber,
+                  fonepayMerchantName: rawSanitized.fonepayMerchantName,
+                  irdSettings: rawSanitized.irdSettings
+                }
+              : {}),
+            ...(canManagePayments
+              ? {
+                  paymentMethodsConfig: rawSanitized.paymentMethodsConfig,
+                  quickCashNotes: rawSanitized.quickCashNotes,
+                  fonepayMerchantName: rawSanitized.fonepayMerchantName
+                }
+              : {}),
+            // Non-owner roles cannot alter securitySettings / ownerControlLocked
+            securitySettings: prev.settings.securitySettings
+          };
+      return {
+        ...prev,
+        settings: nextSettings
+      };
+    });
 
-    if ('logoUrl' in newSettings && activeBusiness && cleanLogoUrl !== activeBusiness.logo) {
+    if ((isFullAdmin || canManageProfile) && 'logoUrl' in newSettings && activeBusiness && cleanLogoUrl !== activeBusiness.logo) {
       const updated = updateBusiness(activeBusiness.businessId, { logo: cleanLogoUrl });
       if (updated) {
         setBusinesses(getRegisteredBusinesses());
       }
     }
 
-    if (cloudSyncStatus === 'connected' && isOwnerOrMaster) {
-      updateCloudBusinessPolicy({
-        businessId: activeBusiness.businessId,
-        settings: sanitizedSettings,
-        ownerControlLocked: sanitizedSettings.securitySettings?.ownerControlLocked
-      }).catch((err) => console.error('Cloud settings sync failed:', err));
+    if (cloudSyncStatus === 'connected') {
+      if (isOwnerOrMaster) {
+        updateCloudBusinessPolicy({
+          businessId: activeBusiness.businessId,
+          settings: rawSanitized,
+          ownerControlLocked: rawSanitized.securitySettings?.ownerControlLocked
+        }).catch((err) => console.error('Cloud settings sync failed:', err));
+      } else if (canModifyTax && (userRole === 'ADMIN' || userRole === 'MANAGER')) {
+        updateCloudBusinessPolicy({
+          businessId: activeBusiness.businessId,
+          settings: {
+            currencySymbol: rawSanitized.currencySymbol,
+            enableVat: rawSanitized.enableVat,
+            vatRatePercent: rawSanitized.vatRatePercent,
+            enableServiceCharge: rawSanitized.enableServiceCharge,
+            serviceChargePercent: rawSanitized.serviceChargePercent,
+            fonepayMerchantName: rawSanitized.fonepayMerchantName
+          }
+        }).catch((err) => console.error('Cloud tax policy sync failed:', err));
+      }
     }
-    recordAudit('BUSINESS_SETTINGS_UPDATED', undefined, `Updated establishment profile and tax rates`, 'INFO');
+    recordAudit(
+      'BUSINESS_SETTINGS_UPDATED',
+      undefined,
+      `Updated tax/payment settings (VAT: ${rawSanitized.enableVat ? rawSanitized.vatRatePercent + '%' : 'OFF'}, SC: ${rawSanitized.enableServiceCharge ? rawSanitized.serviceChargePercent + '%' : 'OFF'})`,
+      'INFO'
+    );
   };
 
   const handleRestoreBackup = (importedState: AppState) => {
@@ -3628,15 +3988,24 @@ export default function App() {
           return;
         }
       } else {
+        const roleChanged = prevUser.role !== nextUser.role;
         const mutated =
-          prevUser.role !== nextUser.role ||
+          roleChanged ||
           prevUser.isActive !== nextUser.isActive ||
           prevUser.pinHash !== nextUser.pinHash ||
           prevUser.name !== nextUser.name ||
+          prevUser.nepaliName !== nextUser.nepaliName ||
           prevUser.username !== nextUser.username ||
-          prevUser.email !== nextUser.email;
-        if (mutated && !canActorAssignRole(userRole, nextUser.role, prevUser.role)) {
+          prevUser.email !== nextUser.email ||
+          prevUser.phone !== nextUser.phone;
+        if (roleChanged && !canActorAssignRole(userRole, nextUser.role, prevUser.role)) {
           const msg = `Permission Denied: ${userRole} cannot modify ${prevUser.role} or escalate to ${nextUser.role}.`;
+          setSecurityAlert(msg);
+          recordAudit('PRIVILEGE_ESCALATION_BLOCKED', nextUser.id, msg, 'CRITICAL');
+          return;
+        }
+        if (!roleChanged && mutated && !canActorManageStaffMember(userRole, prevUser.role)) {
+          const msg = `Permission Denied: ${userRole} cannot modify ${prevUser.role} account.`;
           setSecurityAlert(msg);
           recordAudit('PRIVILEGE_ESCALATION_BLOCKED', nextUser.id, msg, 'CRITICAL');
           return;
@@ -3645,11 +4014,18 @@ export default function App() {
     }
 
     for (const prevUser of appStateRef.current.staffUsers) {
-      if (!nextMap.has(prevUser.id) && !canActorManageStaffMember(userRole, prevUser.role)) {
-        const msg = `Permission Denied: ${userRole} cannot remove ${prevUser.role} account.`;
-        setSecurityAlert(msg);
-        recordAudit('PRIVILEGE_ESCALATION_BLOCKED', prevUser.id, msg, 'CRITICAL');
-        return;
+      if (!nextMap.has(prevUser.id)) {
+        if (prevUser.id === currentSession?.staffId) {
+          const msg = 'Cannot remove your own currently signed-in account.';
+          setSecurityAlert(msg);
+          return;
+        }
+        if (!canActorManageStaffMember(userRole, prevUser.role)) {
+          const msg = `Permission Denied: ${userRole} cannot remove ${prevUser.role} account.`;
+          setSecurityAlert(msg);
+          recordAudit('PRIVILEGE_ESCALATION_BLOCKED', prevUser.id, msg, 'CRITICAL');
+          return;
+        }
       }
     }
 
@@ -3705,13 +4081,13 @@ export default function App() {
         onBackupClick={() => exportBackupJSON(appState)}
         onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
         onOpenBusinessSwitcher={() => {
-          const role = currentSession?.role;
-          if (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'MANAGER') {
+          if (canOpenBusinessSwitcher) {
             setShowBusinessSwitcherModal(true);
           }
         }}
         onOpenMobileQR={() => setShowMobileQRModal(true)}
         isAppCreator={isMasterOwnerGoogle}
+        canSwitchBusiness={canOpenBusinessSwitcher}
       />
 
       {/* Right Main Application Area */}
@@ -3723,11 +4099,11 @@ export default function App() {
           currentSession={currentSession}
           activeBusiness={activeBusiness}
           onOpenBusinessSwitcher={() => {
-            const role = currentSession?.role;
-            if (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN' || role === 'MANAGER') {
+            if (canOpenBusinessSwitcher) {
               setShowBusinessSwitcherModal(true);
             }
           }}
+          canSwitchBusiness={canOpenBusinessSwitcher}
           onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
           onLanguageChange={setLanguage}
           onBackupClick={() => exportBackupJSON(appState)}
@@ -3761,7 +4137,7 @@ export default function App() {
           canFreeSwitchRole={userCanFreeSwitchRoles}
           isMasterOwnerGoogle={isMasterOwnerGoogle}
           cloudSyncStatus={cloudSyncStatus}
-          cloudUserEmail={firebaseUser?.email || null}
+          cloudUserEmail={safeCloudUserEmail}
           onGoogleOwnerLogin={handleGoogleSignIn}
           ownerControlLocked={ownerControlLocked}
           onOpenMobileQR={() => setShowMobileQRModal(true)}
@@ -4066,11 +4442,14 @@ export default function App() {
             lang={language}
             onUpdateBusiness={handleUpdateBusiness}
             onUpdateAppState={setAppState}
+            onUpdateSettings={handleUpdateSettings}
+            onUpdateStaffUsers={handleUpdateStaffUsers}
             recordAudit={recordAudit}
             playChime={playChime}
-            onOpenSetupWizard={() => setShowSetupWizardModal(true)}
+            onOpenSetupWizard={handleOpenSetupWizard}
+            canCreateBusiness={businessCreationEligibility.allowed}
             initialTab={adminInitialTab}
-            firebaseUserEmail={firebaseUser?.email || null}
+            firebaseUserEmail={safeCloudUserEmail}
             isMasterOwnerVerified={isMasterOwnerGoogle}
             cloudSyncConnected={cloudSyncStatus === 'connected'}
             cloudOwnerUid={cloudOwnerUid}
@@ -4112,10 +4491,11 @@ export default function App() {
         onLanguageChange={setLanguage}
         isMandatory={!currentSession}
         ownerControlLocked={ownerControlLocked}
-        cloudUserEmail={firebaseUser?.email || null}
+        cloudUserEmail={safeCloudUserEmail}
         isGoogleAuthLoading={isGoogleAuthLoading}
         isCloudConnecting={cloudSyncStatus === 'connecting'}
         cloudAuthError={cloudAuthError}
+        onClearCloudAuthError={() => setCloudAuthError(null)}
         pendingInvitations={appState.staffInvitations || []}
         onGoogleSignIn={handleGoogleSignIn}
         onEmailPasswordSignIn={handleEmailPasswordSignIn}
@@ -4194,15 +4574,17 @@ export default function App() {
       <BusinessSwitcherModal
         isOpen={showBusinessSwitcherModal}
         onClose={() => setShowBusinessSwitcherModal(false)}
-        businesses={businesses}
+        businesses={accessibleBusinesses}
         activeBusinessId={activeBusiness.businessId}
         onSelectBusiness={handleSwitchBusiness}
         onDeleteBusiness={handleDeleteBusiness}
         onUpdateBusiness={handleUpdateBusiness}
-        onOpenRegister={() => setShowRegisterBusinessModal(true)}
+        onOpenRegister={handleOpenRegisterBusiness}
         onOpenSuperAdmin={() => setShowSuperAdminModal(true)}
         currentRole={currentSession?.role}
         isAppCreator={isMasterOwnerGoogle}
+        canCreateBusiness={businessCreationEligibility.allowed}
+        createBusinessBlockedReason={businessCreationEligibility.reason}
       />
 
       {/* Business Registration / Onboarding Modal */}
@@ -4210,7 +4592,10 @@ export default function App() {
         isOpen={showRegisterBusinessModal}
         onClose={() => setShowRegisterBusinessModal(false)}
         onRegisterSuccess={handleRegisterBusinessSuccess}
-        currentUser={currentSession ? { id: currentSession.staffId, name: currentSession.name, role: currentSession.role } : null}
+        currentUser={currentSession ? { id: currentSession.staffId, name: currentSession.name, role: currentSession.role, businessId: currentSession.businessId } : null}
+        isMasterOwner={isMasterOwnerGoogle}
+        canCreateBusiness={businessCreationEligibility.allowed}
+        blockedReason={businessCreationEligibility.reason}
       />
 
       {/* App Creator & SaaS Control Center Modal */}
@@ -4221,11 +4606,11 @@ export default function App() {
         activeBusinessId={activeBusiness.businessId}
         onSelectBusiness={handleSwitchBusiness}
         onUpdateBusiness={handleUpdateBusiness}
-        onOpenRegister={() => setShowRegisterBusinessModal(true)}
+        onOpenRegister={handleOpenRegisterBusiness}
         currentRole={currentSession?.role}
         isAppCreator={isMasterOwnerGoogle}
         cloudSyncStatus={cloudSyncStatus}
-        cloudUserEmail={firebaseUser?.email || null}
+        cloudUserEmail={safeCloudUserEmail}
         onSyncCloudBusinesses={handleRefreshCreatorCloudBusinesses}
         onGoogleCreatorLogin={handleGoogleSignIn}
       />
@@ -4234,11 +4619,14 @@ export default function App() {
       <BusinessSetupWizardModal
         isOpen={showSetupWizardModal}
         onClose={() => setShowSetupWizardModal(false)}
-        onSetupComplete={(newBiz) => {
-          handleRegisterBusinessSuccess(newBiz);
+        onSetupComplete={(newBiz, newState) => {
+          handleRegisterBusinessSuccess(newBiz, newState);
           setShowSetupWizardModal(false);
         }}
-        currentUser={currentSession ? { id: currentSession.staffId, name: currentSession.name, role: currentSession.role } : null}
+        currentUser={currentSession ? { id: currentSession.staffId, name: currentSession.name, role: currentSession.role, businessId: currentSession.businessId } : null}
+        isMasterOwner={isMasterOwnerGoogle}
+        canCreateBusiness={businessCreationEligibility.allowed}
+        blockedReason={businessCreationEligibility.reason}
       />
 
       {/* Real-Time Sync & Offline Resilience Suite Modal */}

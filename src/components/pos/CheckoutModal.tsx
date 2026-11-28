@@ -31,7 +31,9 @@ import {
   Session
 } from '../../types';
 import { Language } from '../../utils/translations';
-import { SplitPaymentDetails, validatePaymentSettlement } from '../../services/security';
+import { SplitPaymentDetails, hasPermission, validatePaymentSettlement } from '../../services/security';
+import { NumberInput } from '../common/NumberInput';
+import { sanitizeNumericDraft } from '../../utils/numberInput';
 import {
   DEFAULT_QUICK_CASH_NOTES,
   addCustomQuickCashNote,
@@ -429,7 +431,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const canSyncBusinessSettings =
       currentSession?.role === 'OWNER' ||
       currentSession?.role === 'SUPER_ADMIN' ||
-      currentSession?.role === 'ADMIN';
+      currentSession?.role === 'ADMIN' ||
+      currentSession?.role === 'MANAGER' ||
+      (currentSession?.role
+        ? hasPermission(currentSession.role, 'MANAGE_PAYMENT_METHODS', undefined, settings.customRolePermissions)
+        : false);
     if (onUpdateSettings && canSyncBusinessSettings) {
       onUpdateSettings({ ...settings, quickCashNotes: saved });
     }
@@ -609,14 +615,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span>Remaining as Khata Due</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
                     max={Math.max(1, order.grandTotal - 0.01)}
-                    step="1"
-                    value={partialPaidAmount || ''}
-                    onChange={(e) => {
-                      const val = Number(e.target.value) || 0;
+                    blankWhenZero
+                    value={partialPaidAmount}
+                    onValueChange={(val) => {
                       setPartialPaidAmount(val);
                       setCashTendered(Math.round(val * 100) / 100);
                     }}
@@ -857,14 +861,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
                           {settings.currencySymbol}
                         </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={splitAmounts[ch.key] || ''}
-                          onChange={(e) => {
-                            const val = Math.max(0, Number(e.target.value) || 0);
-                            setSplitAmounts((prev) => ({ ...prev, [ch.key]: val }));
+                        <NumberInput
+                          min={0}
+                          blankWhenZero
+                          value={splitAmounts[ch.key]}
+                          onValueChange={(val) => {
+                            const safeVal = Math.max(0, val);
+                            setSplitAmounts((prev) => ({ ...prev, [ch.key]: safeVal }));
                           }}
                           className="w-full pl-7 pr-2 py-1 bg-white border border-slate-300 rounded font-mono-num font-bold text-slate-900 text-right text-xs focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
                         />
@@ -926,13 +929,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-xs text-slate-500 font-semibold">{settings.currencySymbol}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={cashTendered === 0 ? '' : cashTendered}
+                    <NumberInput
+                      min={0}
+                      blankWhenZero
+                      value={cashTendered}
                       onFocus={(e) => e.target.select()}
-                      onChange={(e) => setCashTendered(Math.max(0, Number(e.target.value) || 0))}
+                      onValueChange={(val) => setCashTendered(Math.max(0, val))}
                       className="w-32 px-2.5 py-1.5 text-right font-mono-num font-bold text-slate-900 bg-white border border-slate-300 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
@@ -1029,13 +1031,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                                 {settings.currencySymbol}
                               </span>
                               <input
-                                type="number"
-                                min="1"
-                                step="1"
+                                type="text"
+                                inputMode="numeric"
                                 placeholder={lang === 'ne' ? 'नयाँ रकम (उदा: 750)' : 'Custom amount (e.g. 750)'}
                                 value={customQuickNoteInput}
                                 onChange={(e) => {
-                                  setCustomQuickNoteInput(e.target.value);
+                                  setCustomQuickNoteInput(sanitizeNumericDraft(e.target.value, { allowDecimal: false }));
                                   if (quickNoteError) setQuickNoteError(null);
                                 }}
                                 onKeyDown={(e) => {
@@ -1102,13 +1103,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                                 {settings.currencySymbol}
                               </span>
                               <input
-                                type="number"
-                                min="1"
-                                step="1"
+                                type="text"
+                                inputMode="numeric"
                                 placeholder={lang === 'ne' ? 'आफ्नै नोट रकम राख्नुहोस्...' : 'Add custom note amount...'}
                                 value={customQuickNoteInput}
                                 onChange={(e) => {
-                                  setCustomQuickNoteInput(e.target.value);
+                                  setCustomQuickNoteInput(sanitizeNumericDraft(e.target.value, { allowDecimal: false }));
                                   if (quickNoteError) setQuickNoteError(null);
                                 }}
                                 onKeyDown={(e) => {

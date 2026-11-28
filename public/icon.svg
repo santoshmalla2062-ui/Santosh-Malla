@@ -1,12 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <rect width="512" height="512" rx="112" fill="#0F172A"/>
-  <rect x="28" y="28" width="456" height="456" rx="92" fill="#1E293B" stroke="#10B981" stroke-width="8" stroke-opacity="0.35"/>
-  <!-- Stylized Himalayan Peaks -->
-  <path d="M96 340L196 168L268 276L330 198L416 340H96Z" fill="#10B981"/>
-  <path d="M196 168L244 240L210 264L168 216L196 168Z" fill="#ECFDF5"/>
-  <path d="M330 198L370 264L340 278L308 228L330 198Z" fill="#ECFDF5"/>
-  <!-- Warm Sun / Hospitality Circle -->
-  <circle cx="354" cy="142" r="34" fill="#F59E0B"/>
-  <!-- Clean POS Underline Accent -->
-  <rect x="118" y="366" width="276" height="22" rx="11" fill="#F8FAFC" fill-opacity="0.92"/>
+  <!-- Culinary Flame & Steam -->
+  <path d="M256 76C274 102 282 122 272 142C266 154 256 158 256 158C256 158 236 148 236 126C236 108 248 92 256 76Z" fill="#F97316"/>
+  <path d="M180 184C172 162 188 142 182 120" stroke="#FB923C" stroke-width="14" stroke-linecap="round"/>
+  <path d="M332 184C340 162 324 142 330 120" stroke="#FB923C" stroke-width="14" stroke-linecap="round"/>
+  <!-- Cloche Knob -->
+  <circle cx="256" cy="172" r="14" fill="#FFFFFF"/>
+  <!-- Cloche Serving Dome -->
+  <path d="M148 272C148 212 196 178 256 178C316 178 364 212 364 272H148Z" fill="#F97316"/>
+  <path d="M164 268C164 218 206 186 256 186C282 186 298 204 294 228C290 252 246 268 164 268Z" fill="#FFFFFF"/>
+  <!-- Serving Platter Base -->
+  <rect x="128" y="280" width="256" height="18" rx="9" fill="#F97316"/>
+  <!-- Crossed Spoon & Slotted Spatula -->
+  <path d="M168 386L324 316" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round"/>
+  <ellipse cx="154" cy="322" rx="34" ry="20" transform="rotate(20 154 322)" fill="#FFFFFF"/>
+  <path d="M186 334L344 390" stroke="#E2E8F0" stroke-width="18" stroke-linecap="round"/>
+  <rect x="314" y="294" width="64" height="44" rx="10" transform="rotate(-24 346 316)" fill="#FFFFFF"/>
+  <path d="M326 308L356 294M332 320L362 306" stroke="#0F172A" stroke-width="6" stroke-linecap="round"/>
 </svg>

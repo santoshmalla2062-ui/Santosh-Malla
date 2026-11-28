@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './testEnv';
+import * as cloudSyncModule from '../services/cloudSyncService';
 import {
-  MASTER_OWNER_EMAIL,
-  APP_CREATOR_EMAIL,
   ALL_SYNC_CHANNELS,
+  isMasterOwnerEmail,
   isMasterOwnerUser,
   isAppCreatorUser,
+  redactProtectedEmail,
   canFreeSwitchRoles,
   getVisibleDemoPinRoles,
   canRoleReadChannel,
@@ -15,8 +16,12 @@ import {
   extractChannelPayload,
   mergeChannelPayloadIntoAppState,
   buildSanitizedOrderDocPayload,
-  enqueueSerializedDocWrite
+  enqueueSerializedDocWrite,
+  buildCandidateBusinessDiscoveryOrder,
+  getWorkspaceAccessDocId,
+  DEFAULT_WORKSPACE_CANDIDATES
 } from '../services/cloudSyncService';
+import { formatFirebaseAuthError } from '../firebase';
 import { getInitialAppState } from '../services/storage';
 import { upsertSyncedCloudBusinesses, getRegisteredBusinesses } from '../services/tenantStorage';
 import { getCurrentSession, clearSession, hasPermission } from '../services/security';
@@ -37,23 +42,30 @@ function makeBaseState(): AppState {
         strictTenantDataIsolation: true,
         allowSuperAdminAuditInspect: true,
         ...(base.settings.securitySettings || {}),
-        ownerControlLocked: true,
-        masterOwnerEmail: MASTER_OWNER_EMAIL
+        ownerControlLocked: true
       }
     }
   };
 }
 
-test('Master Owner Verification: Strictly enforces verified samjhamnamalla22444@gmail.com', () => {
-  assert.strictEqual(MASTER_OWNER_EMAIL, 'samjhamnamalla22444@gmail.com');
+const TEST_MASTER_OWNER_EMAIL = Buffer.from('c2FtamhhbW5hbWFsbGEyMjQ0NEBnbWFpbC5jb20=', 'base64').toString('utf8');
+
+test('Master Owner Verification: Strictly enforces verified Super Admin via hash without exposing plaintext email', () => {
+  assert.strictEqual('MASTER_OWNER_EMAIL' in cloudSyncModule, false, 'Plaintext MASTER_OWNER_EMAIL must not be exported');
+  assert.strictEqual('APP_CREATOR_EMAIL' in cloudSyncModule, false, 'Plaintext APP_CREATOR_EMAIL must not be exported');
 
   assert.strictEqual(
-    isMasterOwnerUser({ email: 'SamjhamnaMalla22444@gmail.com', emailVerified: true }),
+    isMasterOwnerEmail(TEST_MASTER_OWNER_EMAIL),
+    true,
+    'Exact Master Owner email should pass hash verification'
+  );
+  assert.strictEqual(
+    isMasterOwnerUser({ email: `  ${TEST_MASTER_OWNER_EMAIL.toUpperCase()}  `, emailVerified: true }),
     true,
     'Case-insensitive verified Master Owner email should pass'
   );
   assert.strictEqual(
-    isMasterOwnerUser({ email: MASTER_OWNER_EMAIL, emailVerified: false }),
+    isMasterOwnerUser({ email: TEST_MASTER_OWNER_EMAIL, emailVerified: false }),
     false,
     'Unverified Master Owner email must be rejected'
   );
@@ -63,6 +75,8 @@ test('Master Owner Verification: Strictly enforces verified samjhamnamalla22444@
     'Non-owner verified email must be rejected'
   );
   assert.strictEqual(isMasterOwnerUser(null), false);
+  assert.strictEqual(redactProtectedEmail(TEST_MASTER_OWNER_EMAIL, 'Protected'), 'Protected');
+  assert.strictEqual(redactProtectedEmail('staff@example.com', 'Protected'), 'staff@example.com');
 });
 
 test('Privilege Escalation Defense: Terminal locks role switching and hides Owner/demo PINs', () => {
@@ -249,6 +263,36 @@ test('Sync Channel Extraction & Round-Trip State Merge', () => {
     tablesRooms: baseState.tablesRooms
   });
   assert.strictEqual(merged.menuItems.some((m) => m.id === 'm-cloud-99'), true);
+
+  // Manager can sync paymentMethodsConfig and panVatNumber via finance_records while admin_controls stays blocked
+  assert.strictEqual(canRoleWriteChannel('MANAGER', 'finance_records', false), true);
+  assert.strictEqual(canRoleWriteChannel('MANAGER', 'admin_controls', false), false);
+
+  const alteredPaymentState: AppState = {
+    ...baseState,
+    settings: {
+      ...baseState.settings,
+      panVatNumber: '609876543',
+      paymentMethodsConfig: [
+        ...(baseState.settings.paymentMethodsConfig || []),
+        {
+          id: 'pm-ime-pay',
+          name: 'IME Pay',
+          type: 'custom',
+          enabled: true,
+          accountDetails: '9800001122'
+        }
+      ]
+    }
+  };
+  const financePayload = extractChannelPayload('finance_records', alteredPaymentState);
+  assert.strictEqual(financePayload.panVatNumber, '609876543');
+  assert.ok(Array.isArray(financePayload.paymentMethodsConfig));
+  assert.ok(financePayload.paymentMethodsConfig.some((pm: any) => pm.id === 'pm-ime-pay'));
+
+  const mergedFinance = mergeChannelPayloadIntoAppState(baseState, 'finance_records', financePayload);
+  assert.strictEqual(mergedFinance.settings.panVatNumber, '609876543');
+  assert.ok(mergedFinance.settings.paymentMethodsConfig?.some((pm) => pm.id === 'pm-ime-pay'));
 });
 
 test('Order Cloud Sync Hardening: Serializes concurrent order writes & normalizes enums/nulls', async () => {
@@ -314,9 +358,8 @@ test('Order Cloud Sync Hardening: Serializes concurrent order writes & normalize
 });
 
 test('App Creator Sync: SUPER_ADMIN verification, global role switching, and cloud tenant upsert', () => {
-  assert.strictEqual(APP_CREATOR_EMAIL, MASTER_OWNER_EMAIL);
   assert.strictEqual(
-    isAppCreatorUser({ email: 'SamjhamnaMalla22444@gmail.com', emailVerified: true }),
+    isAppCreatorUser({ email: TEST_MASTER_OWNER_EMAIL.toUpperCase(), emailVerified: true }),
     true
   );
   assert.strictEqual(
@@ -390,6 +433,48 @@ test('App Creator Sync: SUPER_ADMIN verification, global role switching, and clo
     mergedAgain.filter((b) => b.businessId === 'biz-remote-client-101').length,
     1
   );
+});
+
+test('Mobile Workspace Discovery & Firebase Auth Error Guidance', () => {
+  const docId = getWorkspaceAccessDocId('biz-resort-01', 'inv-abc123');
+  assert.strictEqual(docId, 'biz-resort-01__inv-abc123');
+  assert.ok(docId.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(docId));
+
+  const longId = getWorkspaceAccessDocId('biz-' + 'x'.repeat(100), 'inv-' + 'y'.repeat(100));
+  assert.strictEqual(longId.length, 128);
+
+  const discoveryOrder = buildCandidateBusinessDiscoveryOrder({
+    preferredBusinessId: 'biz-himalayan-breeze',
+    directoryBusinessIds: ['biz-manager-branch', '../bad-id', 'biz-himalayan-breeze'],
+    memberGroupBusinessIds: ['biz-pokhara-lodge', 'biz-manager-branch'],
+    inviteGroupBusinessIds: ['biz-invite-extra'],
+    localCandidateBusinessIds: ['biz-local-other']
+  });
+
+  assert.strictEqual(discoveryOrder[0], 'biz-himalayan-breeze');
+  assert.strictEqual(discoveryOrder[1], 'biz-manager-branch');
+  assert.ok(discoveryOrder.includes('biz-invite-extra'));
+  assert.ok(discoveryOrder.includes('biz-local-other'));
+  assert.equal(discoveryOrder.includes('../bad-id'), false);
+  for (const defBiz of DEFAULT_WORKSPACE_CANDIDATES) {
+    assert.ok(discoveryOrder.includes(defBiz));
+  }
+  assert.strictEqual(new Set(discoveryOrder).size, discoveryOrder.length, 'Candidates must be deduplicated');
+
+  const domainErrEn = formatFirebaseAuthError({ code: 'auth/unauthorized-domain' }, 'en');
+  assert.ok(domainErrEn.includes('Authorized domains'));
+
+  const webViewErrNe = formatFirebaseAuthError({ code: 'auth/operation-not-supported-in-this-environment' }, 'ne');
+  assert.ok(webViewErrNe.includes('WebView'));
+
+  const firstTimeEmailEn = formatFirebaseAuthError({ code: 'auth/invalid-credential' }, 'en');
+  assert.ok(firstTimeEmailEn.includes('First-Time Email'));
+
+  const alreadyInUseEn = formatFirebaseAuthError({ code: 'auth/email-already-in-use' }, 'en');
+  assert.ok(alreadyInUseEn.includes('Sign In') && alreadyInUseEn.includes('Forgot Password'));
+
+  const expiredLinkNe = formatFirebaseAuthError({ code: 'auth/expired-action-code' }, 'ne');
+  assert.ok(expiredLinkNe.length > 10);
 });
 
 

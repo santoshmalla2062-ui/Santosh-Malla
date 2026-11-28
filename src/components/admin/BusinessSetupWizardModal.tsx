@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   X, 
   Building2, 
@@ -18,12 +19,13 @@ import {
   Sparkles,
   AlertCircle
 } from 'lucide-react';
-import { AppModule, BusinessTenant, BusinessType, PaymentMethodConfig, ReceiptSettings, StaffRole } from '../../types';
+import { AppModule, AppState, BusinessTenant, BusinessType, PaymentMethodConfig, ReceiptSettings, StaffRole } from '../../types';
 import { 
   ALL_APP_MODULES, 
   DEFAULT_MODULES_BY_TYPE, 
   DEFAULT_PAYMENT_METHODS, 
   DEFAULT_RECEIPT_SETTINGS, 
+  canActorCreateBusiness,
   registerNewBusiness,
   saveTenantAppState,
   loadTenantAppState
@@ -32,15 +34,21 @@ import {
 interface BusinessSetupWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSetupComplete: (business: BusinessTenant) => void;
-  currentUser?: { id: string; name: string; role: StaffRole } | null;
+  onSetupComplete: (business: BusinessTenant, initialState?: AppState) => void;
+  currentUser?: { id: string; name: string; role: StaffRole; businessId?: string } | null;
+  isMasterOwner?: boolean;
+  canCreateBusiness?: boolean;
+  blockedReason?: string;
 }
 
 export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> = ({
   isOpen,
   onClose,
   onSetupComplete,
-  currentUser
+  currentUser,
+  isMasterOwner = false,
+  canCreateBusiness,
+  blockedReason
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
@@ -120,7 +128,23 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
     }
   };
 
+  const fallbackEligibility = canActorCreateBusiness({
+    id: currentUser?.id,
+    role: currentUser?.role,
+    isAppCreator: isMasterOwner,
+    businessId: currentUser?.businessId
+  });
+  const isCreationAllowed = canCreateBusiness !== undefined ? canCreateBusiness : fallbackEligibility.allowed;
+  const effectiveBlockedReason =
+    blockedReason ||
+    fallbackEligibility.reason ||
+    'Single-Business Policy: Your account already owns a business workspace and cannot create another.';
+
   const handleFinalSubmit = () => {
+    if (!isCreationAllowed) {
+      setError(effectiveBlockedReason);
+      return;
+    }
     try {
       const { business, state } = registerNewBusiness({
         businessName: businessName.trim(),
@@ -134,7 +158,10 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
         logo: logo.trim() || undefined,
         ownerId: currentUser?.id || 'owner-' + Date.now().toString(36),
         ownerName: currentUser?.name || 'Business Owner',
-        enabledModules
+        enabledModules,
+        enforceSingleBusinessCap: true,
+        actorRole: currentUser?.role || 'OWNER',
+        isMasterOwner
       });
 
       // Apply Step 3 custom settings into the state
@@ -152,7 +179,7 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
       };
 
       saveTenantAppState(business.businessId, state);
-      onSetupComplete(business);
+      onSetupComplete(business, state);
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to complete business setup.');
@@ -218,6 +245,27 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
         </div>
 
         {/* Content Area */}
+        {!isCreationAllowed ? (
+          <div className="p-6 space-y-4">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-xs text-amber-950">
+              <ShieldCheck className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-sm">Single-Business Policy Active</p>
+                <p className="leading-relaxed">{effectiveBlockedReason}</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : (
+        <>
         <div className="p-6 overflow-y-auto flex-1 space-y-4">
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-700">
@@ -424,13 +472,11 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
                   </div>
                   {enableVat && (
                     <div className="flex items-center gap-2">
-                      <input 
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.5"
+                      <NumberInput
+                        min={0}
+                        max={100}
                         value={vatRatePercent}
-                        onChange={e => setVatRatePercent(parseFloat(e.target.value) || 0)}
+                        onValueChange={val => setVatRatePercent(val)}
                         className="w-20 px-2.5 py-1 text-xs border border-slate-300 rounded-lg font-mono-num font-bold"
                       />
                       <span className="text-xs text-slate-500">% legal VAT rate</span>
@@ -450,13 +496,11 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
                   </div>
                   {enableServiceCharge && (
                     <div className="flex items-center gap-2">
-                      <input 
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.5"
+                      <NumberInput
+                        min={0}
+                        max={100}
                         value={serviceChargePercent}
-                        onChange={e => setServiceChargePercent(parseFloat(e.target.value) || 0)}
+                        onValueChange={val => setServiceChargePercent(val)}
                         className="w-20 px-2.5 py-1 text-xs border border-slate-300 rounded-lg font-mono-num font-bold"
                       />
                       <span className="text-xs text-slate-500">% service fee</span>
@@ -550,6 +594,8 @@ export const BusinessSetupWizardModal: React.FC<BusinessSetupWizardModalProps> =
             )}
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

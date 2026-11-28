@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Building2,
   Download,
   Volume2,
   VolumeX,
@@ -51,6 +50,7 @@ interface HeaderProps {
   onGoogleOwnerLogin?: () => void;
   ownerControlLocked?: boolean;
   onOpenMobileQR?: () => void;
+  canSwitchBusiness?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -75,7 +75,8 @@ export const Header: React.FC<HeaderProps> = ({
   canFreeSwitchRole = false,
   isMasterOwnerGoogle = false,
   cloudSyncStatus = 'local',
-  ownerControlLocked = true
+  ownerControlLocked = true,
+  canSwitchBusiness = false
 }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showRoleList, setShowRoleList] = useState(false);
@@ -110,11 +111,10 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, [showAccountMenu]);
 
-  const canSwitchBranch =
-    currentSession?.role === 'SUPER_ADMIN' ||
-    currentSession?.role === 'OWNER' ||
-    currentSession?.role === 'ADMIN' ||
-    currentSession?.role === 'MANAGER';
+  const canSwitchBranch = Boolean(
+    onOpenBusinessSwitcher &&
+    (currentSession?.role === 'SUPER_ADMIN' || canSwitchBusiness)
+  );
 
   const canViewAuditLogs =
     currentSession?.role === 'ADMIN' ||
@@ -172,13 +172,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <img
                   src={resolvedLogo}
                   alt={settings.businessName || 'Business Logo'}
+                  referrerPolicy="no-referrer"
                   onError={() => setLogoLoadError(true)}
                   className="h-7 w-7 rounded-lg object-cover border border-slate-200 bg-white shrink-0"
                 />
               ) : (
-                <div className="h-7 w-7 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0">
-                  <Building2 className="h-4 w-4" />
-                </div>
+                <img
+                  src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
+                  alt={settings.businessName || 'CAFe Host'}
+                  referrerPolicy="no-referrer"
+                  className="h-7 w-7 rounded-lg object-cover border border-slate-200 bg-slate-900 shrink-0"
+                />
               )}
               <span className="font-bold text-xs sm:text-sm text-slate-900 truncate max-w-[160px] sm:max-w-[260px]">
                 {lang === 'ne' && settings.nepaliBusinessName

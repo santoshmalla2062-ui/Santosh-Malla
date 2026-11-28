@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   Building2, 
   Users, 
@@ -96,15 +97,18 @@ import {
   AppAction
 } from '../../services/security';
 import {
-  MASTER_OWNER_EMAIL,
   CloudStaffInvite,
   CloudMemberRecord,
   listCloudInvites,
   listCloudMembers,
   createCloudStaffInvite,
   revokeCloudStaffInvite,
+  deleteCloudStaffInvite,
   updateCloudMemberAccess,
-  updateCloudBusinessPolicy
+  deleteCloudMemberAccess,
+  updateCloudBusinessPolicy,
+  syncExistingInvitesToWorkspaceDirectory,
+  isMasterOwnerEmail
 } from '../../services/cloudSyncService';
 import { InviteStaffModal } from './InviteStaffModal';
 import { BusinessDataIsolationTestModal } from './BusinessDataIsolationTestModal';
@@ -120,6 +124,8 @@ interface BusinessAdminViewProps {
   lang: 'en' | 'ne';
   onUpdateBusiness: (businessId: string, updates: Partial<BusinessTenant>) => void;
   onUpdateAppState: React.Dispatch<React.SetStateAction<AppState>>;
+  onUpdateSettings?: (newSettings: BusinessSettings) => void;
+  onUpdateStaffUsers?: (users: StaffUser[]) => void;
   recordAudit: (action: string, targetId?: string, details?: string, severity?: 'INFO' | 'WARNING' | 'CRITICAL') => void;
   playChime: (type?: 'success' | 'alert' | 'beep') => void;
   onOpenSetupWizard?: () => void;
@@ -132,6 +138,7 @@ interface BusinessAdminViewProps {
   onGoogleSignOut?: () => Promise<void> | void;
   onChangeOwnerPin?: (newPin: string) => Promise<void>;
   onOpenDownloadPortal?: () => void;
+  canCreateBusiness?: boolean;
 }
 
 type AdminTab = 
@@ -155,6 +162,8 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   lang,
   onUpdateBusiness,
   onUpdateAppState,
+  onUpdateSettings,
+  onUpdateStaffUsers,
   recordAudit,
   playChime,
   onOpenSetupWizard,
@@ -166,7 +175,8 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   onGoogleOwnerConnect,
   onGoogleSignOut,
   onChangeOwnerPin,
-  onOpenDownloadPortal
+  onOpenDownloadPortal,
+  canCreateBusiness = false
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || 'dashboard');
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -240,10 +250,22 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
+  const [addStaffError, setAddStaffError] = useState<string | null>(null);
+  const [editStaffError, setEditStaffError] = useState<string | null>(null);
 
   // Reset PIN modal
   const [resetPinStaff, setResetPinStaff] = useState<StaffUser | null>(null);
   const [newResetPin, setNewResetPin] = useState('');
+  const [resetPinError, setResetPinError] = useState<string | null>(null);
+
+  // Remove / Delete confirmation modal (in-app, never window.confirm)
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<
+    | { kind: 'staff'; staff: StaffUser }
+    | { kind: 'cloudMember'; member: CloudMemberRecord }
+    | { kind: 'cloudInvite'; invite: CloudStaffInvite }
+    | null
+  >(null);
+  const [isDeletingCloudItem, setIsDeletingCloudItem] = useState(false);
 
   // Custom Payment Method modal
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
@@ -274,6 +296,20 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const [serviceChargeRate, setServiceChargeRate] = useState(appState.settings?.serviceChargePercent ?? 10);
   const [currency, setCurrency] = useState(appState.settings?.currencySymbol || 'Rs.');
 
+  useEffect(() => {
+    setVatEnabled(appState.settings?.enableVat ?? true);
+    setVatRate(appState.settings?.vatRatePercent ?? 13);
+    setServiceChargeEnabled(appState.settings?.enableServiceCharge ?? true);
+    setServiceChargeRate(appState.settings?.serviceChargePercent ?? 10);
+    setCurrency(appState.settings?.currencySymbol || 'Rs.');
+  }, [
+    appState.settings?.enableVat,
+    appState.settings?.vatRatePercent,
+    appState.settings?.enableServiceCharge,
+    appState.settings?.serviceChargePercent,
+    appState.settings?.currencySymbol
+  ]);
+
   // Notifications Settings State
   const [notificationForm, setNotificationForm] = useState<NotificationSettings>(() => {
     return appState.settings?.notificationSettings || {
@@ -296,19 +332,18 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       requirePinForDayClose: existing?.requirePinForDayClose ?? true,
       strictTenantDataIsolation: existing?.strictTenantDataIsolation ?? true,
       allowSuperAdminAuditInspect: existing?.allowSuperAdminAuditInspect ?? true,
-      ownerControlLocked: existing?.ownerControlLocked !== false,
-      masterOwnerEmail: existing?.masterOwnerEmail || MASTER_OWNER_EMAIL
+      ownerControlLocked: existing?.ownerControlLocked !== false
     };
   });
 
   useEffect(() => {
     const existing = appState.settings?.securitySettings;
     if (existing) {
+      const { masterOwnerEmail: _dropped, ...restExisting } = existing;
       setSecurityForm(prev => ({
         ...prev,
-        ...existing,
-        ownerControlLocked: existing.ownerControlLocked !== false,
-        masterOwnerEmail: existing.masterOwnerEmail || MASTER_OWNER_EMAIL
+        ...restExisting,
+        ownerControlLocked: restExisting.ownerControlLocked !== false
       }));
     }
   }, [appState.settings?.securitySettings]);
@@ -339,13 +374,46 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     currentSession?.role === 'ADMIN';
 
   const canManageStaffRoster = isOwnerOrAdmin || actorRole === 'MANAGER' || canActorManageStaff(actorRole);
+  const canManagePayments =
+    isOwnerOrAdmin ||
+    (actorRole
+      ? hasPermission(actorRole, 'MANAGE_PAYMENT_METHODS', undefined, appState.settings?.customRolePermissions)
+      : false);
+  const canManageTaxes =
+    isOwnerOrAdmin ||
+    (actorRole
+      ? hasPermission(actorRole, 'MODIFY_TAX_CONFIG', undefined, appState.settings?.customRolePermissions)
+      : false);
   const assignableRoles = useMemo(() => getAssignableRolesForActor(actorRole), [actorRole]);
 
+  const applyStaffUsersChange = (nextUsers: StaffUser[]) => {
+    if (onUpdateStaffUsers) {
+      onUpdateStaffUsers(nextUsers);
+    } else {
+      onUpdateAppState(prev => ({ ...prev, staffUsers: nextUsers }));
+    }
+  };
+
+  const isProtectedCloudMember = (member: CloudMemberRecord): boolean => {
+    const cleanCurrentEmail = (firebaseUserEmail || '').trim().toLowerCase();
+    const cleanMemberEmail = (member.email || '').trim().toLowerCase();
+    return (
+      member.role === 'OWNER' ||
+      member.role === 'SUPER_ADMIN' ||
+      (Boolean(cloudOwnerUid) && member.uid === cloudOwnerUid) ||
+      isMasterOwnerEmail(member.email) ||
+      (Boolean(cleanCurrentEmail) && cleanMemberEmail === cleanCurrentEmail)
+    );
+  };
+
   useEffect(() => {
-    if (!isOwnerOrAdmin && !['dashboard', 'staff', 'audit'].includes(activeTab)) {
+    const allowedTabs: AdminTab[] = ['dashboard', 'staff', 'security', 'audit'];
+    if (canManagePayments) allowedTabs.push('payments');
+    if (canManageTaxes) allowedTabs.push('taxes');
+    if (!isOwnerOrAdmin && !allowedTabs.includes(activeTab)) {
       setActiveTab('staff');
     }
-  }, [isOwnerOrAdmin, activeTab]);
+  }, [isOwnerOrAdmin, canManagePayments, canManageTaxes, activeTab]);
 
   const refreshCloudAccessLists = async () => {
     if (!cloudSyncConnected || !canManageStaffRoster) return;
@@ -358,6 +426,12 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       ]);
       setCloudInvites(invites);
       setCloudMembers(members);
+      // Best-effort backfill of existing workspace invites into /workspaceAccess for fresh mobile discovery
+      syncExistingInvitesToWorkspaceDirectory({
+        businessId: business.businessId,
+        businessName: business.businessName,
+        invites
+      }).catch(() => {});
     } catch (err: any) {
       setCloudAccessError(err?.message || 'Could not load cloud mobile device access list.');
     } finally {
@@ -572,7 +646,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     const updatedUsers = appState.staffUsers.map(u => 
       u.id === staff.id ? { ...u, isActive: !u.isActive } : u
     );
-    onUpdateAppState(prev => ({ ...prev, staffUsers: updatedUsers }));
+    applyStaffUsersChange(updatedUsers);
     recordAudit('STAFF_STATUS_TOGGLED', staff.id, `Staff ${staff.name} is now ${!staff.isActive ? 'Active' : 'Disabled'}`);
     playChime('beep');
     showBanner(`Staff account ${staff.name} status updated.`);
@@ -580,17 +654,22 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAddStaffError(null);
     if (!newStaffUsername.trim() || !newStaffName.trim() || !newStaffPin.trim()) {
+      setAddStaffError(lang === 'ne' ? 'युजरनेम, पूरा नाम र ४–८ अंकको PIN आवश्यक छ।' : 'Username, full name, and 4–8 digit PIN are required.');
       return;
     }
     if (!canActorAssignRole(actorRole, newStaffRole)) {
-      showBanner(`Permission denied: ${actorRole || 'User'} cannot assign role ${newStaffRole}.`);
+      const msg = `Permission denied: ${actorRole || 'User'} cannot assign role ${newStaffRole}.`;
+      setAddStaffError(msg);
+      showBanner(msg);
       return;
     }
 
     const pinCheck = await validateProductionPin(newStaffPin.trim(), appState.staffUsers);
     if (!pinCheck.isValid) {
-      showBanner(pinCheck.error || 'Weak or duplicate PIN is not allowed.');
+      const msg = pinCheck.error || 'Weak or duplicate PIN is not allowed.';
+      setAddStaffError(msg);
       return;
     }
 
@@ -608,14 +687,12 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       created.mustChangePin = false;
       created.lastPinChangedAt = new Date().toISOString();
 
-      onUpdateAppState(prev => ({
-        ...prev,
-        staffUsers: [...prev.staffUsers, created]
-      }));
+      applyStaffUsersChange([...appState.staffUsers, created]);
 
       recordAudit('STAFF_ACCOUNT_CREATED', created.id, `Created staff ${created.name} (${created.role}) strictly for ${business.businessName}`);
       playChime('success');
       setShowAddStaffModal(false);
+      setAddStaffError(null);
       setNewStaffUsername('');
       setNewStaffName('');
       setNewStaffPin('');
@@ -623,30 +700,38 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       setNewStaffPhone('');
       showBanner(`Staff ${created.name} added to roster.`);
     } catch (err: any) {
-      showBanner(err?.message || 'Failed to create staff account');
+      setAddStaffError(err?.message || 'Failed to create staff account');
     }
   };
 
   const handleSavePayments = () => {
+    if (!canManagePayments) return;
     const sanitizedList = paymentsList.map(pm => ({
       ...pm,
       qrImageDataUrl: sanitizePaymentQrDataUrl(pm.qrImageDataUrl)
     }));
     setPaymentsList(sanitizedList);
-    onUpdateAppState(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        ...appState.settings,
         paymentMethodsConfig: sanitizedList
-      }
-    }));
+      });
+    } else {
+      onUpdateAppState(prev => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          paymentMethodsConfig: sanitizedList
+        }
+      }));
+    }
     recordAudit('PAYMENT_METHODS_CONFIGURED', business.businessId, `Configured ${sanitizedList.filter(p => p.enabled).length} payment methods`);
     playChime('success');
     showBanner(lang === 'ne' ? 'भुक्तानी माध्यम र QR विवरण सुरक्षित गरियो!' : 'Payment configuration & QR images saved!');
   };
 
   const handlePaymentQrUpload = async (paymentId: string, file?: File) => {
-    if (!file) return;
+    if (!file || !canManagePayments) return;
     setPaymentQrError(null);
     setUploadingQrPaymentId(paymentId);
     try {
@@ -655,13 +740,20 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
         pm.id === paymentId ? { ...pm, qrImageDataUrl: compressedDataUrl, enabled: true } : pm
       );
       setPaymentsList(updated);
-      onUpdateAppState(prev => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
+      if (onUpdateSettings) {
+        onUpdateSettings({
+          ...appState.settings,
           paymentMethodsConfig: updated
-        }
-      }));
+        });
+      } else {
+        onUpdateAppState(prev => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            paymentMethodsConfig: updated
+          }
+        }));
+      }
       recordAudit('PAYMENT_QR_UPLOADED', paymentId, `Uploaded Scan-to-Pay QR photo for ${paymentId}`);
       playChime('success');
       showBanner(lang === 'ne' ? 'भुक्तानी QR फोटो अपलोड भई सिंक भयो!' : 'Payment QR photo uploaded and synced to checkout!');
@@ -673,17 +765,25 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   const handleRemovePaymentQr = (paymentId: string) => {
+    if (!canManagePayments) return;
     const updated = paymentsList.map(pm =>
       pm.id === paymentId ? { ...pm, qrImageDataUrl: undefined } : pm
     );
     setPaymentsList(updated);
-    onUpdateAppState(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        ...appState.settings,
         paymentMethodsConfig: updated
-      }
-    }));
+      });
+    } else {
+      onUpdateAppState(prev => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          paymentMethodsConfig: updated
+        }
+      }));
+    }
     recordAudit('PAYMENT_QR_REMOVED', paymentId, `Removed Scan-to-Pay QR photo for ${paymentId}`);
     showBanner(lang === 'ne' ? 'भुक्तानी QR फोटो हटाइयो।' : 'Payment QR photo removed.');
   };
@@ -704,20 +804,44 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
   const handleSaveTaxes = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateAppState(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
+    if (!canManageTaxes) return;
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        ...appState.settings,
         currencySymbol: currency,
         enableVat: vatEnabled,
         vatRatePercent: vatRate,
         enableServiceCharge: serviceChargeEnabled,
         serviceChargePercent: serviceChargeRate
+      });
+    } else {
+      onUpdateAppState(prev => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          currencySymbol: currency,
+          enableVat: vatEnabled,
+          vatRatePercent: vatRate,
+          enableServiceCharge: serviceChargeEnabled,
+          serviceChargePercent: serviceChargeRate
+        }
+      }));
+      if (cloudSyncConnected && canManageTaxes) {
+        updateCloudBusinessPolicy({
+          businessId: business.businessId,
+          settings: {
+            currencySymbol: currency,
+            enableVat: vatEnabled,
+            vatRatePercent: vatRate,
+            enableServiceCharge: serviceChargeEnabled,
+            serviceChargePercent: serviceChargeRate
+          }
+        }).catch(() => {});
       }
-    }));
+    }
     recordAudit('TAX_CONFIG_MUTATED', business.businessId, `VAT: ${vatEnabled ? vatRate + '%' : 'Off'}, Service Charge: ${serviceChargeEnabled ? serviceChargeRate + '%' : 'Off'}`);
     playChime('success');
-    showBanner('Tax & charge policies saved!');
+    showBanner(lang === 'ne' ? 'कर तथा सेवा शुल्क नीति सुरक्षित गरियो!' : 'Tax & charge policies saved!');
   };
 
   const handleSaveNotifications = (e: React.FormEvent) => {
@@ -737,10 +861,10 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
   const handleSaveSecurity = async (e: React.FormEvent) => {
     e.preventDefault();
+    const { masterOwnerEmail: _dropped, ...restSecurityForm } = securityForm;
     const nextSecurity: SecuritySettings = {
-      ...securityForm,
-      ownerControlLocked: securityForm.ownerControlLocked !== false,
-      masterOwnerEmail: MASTER_OWNER_EMAIL
+      ...restSecurityForm,
+      ownerControlLocked: securityForm.ownerControlLocked !== false
     };
     onUpdateAppState(prev => ({
       ...prev,
@@ -768,8 +892,8 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const handleUpdateOwnerMasterPin = async () => {
     setPinChangeMsg(null);
     const trimmedPin = ownerNewPin.trim();
-    if (!/^\d{4,6}$/.test(trimmedPin)) {
-      setPinChangeMsg({ type: 'error', text: lang === 'ne' ? 'PIN ४ देखि ६ अंकको नम्बर हुनुपर्छ।' : 'PIN must be 4 to 6 numeric digits.' });
+    if (!/^\d{4,8}$/.test(trimmedPin)) {
+      setPinChangeMsg({ type: 'error', text: lang === 'ne' ? 'PIN ४ देखि ८ अंकको नम्बर हुनुपर्छ।' : 'PIN must be 4 to 8 numeric digits.' });
       return;
     }
     if (trimmedPin !== ownerConfirmPin.trim()) {
@@ -828,6 +952,14 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     const targetEmail = cloudInviteEmail.trim();
     const targetName = cloudInviteName.trim();
     const targetRole = cloudInviteRole;
+    if (isMasterOwnerEmail(targetEmail)) {
+      setCloudAccessError(
+        lang === 'ne'
+          ? 'यो सुरक्षित प्रणाली खाता हो; निमन्त्रणा पठाउन आवश्यक छैन।'
+          : 'This protected system account already has global access and cannot be invited here.'
+      );
+      return;
+    }
     if (!canActorAssignRole(actorRole, targetRole)) {
       setCloudAccessError(
         lang === 'ne'
@@ -841,6 +973,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     try {
       await createCloudStaffInvite({
         businessId: business.businessId,
+        businessName: business.businessName,
         ownerUid: cloudOwnerUid,
         email: targetEmail,
         staffName: targetName,
@@ -1047,54 +1180,151 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
   const handleResetPinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetPinStaff || newResetPin.length < 4) return;
-    if (!canActorManageStaffMember(actorRole, resetPinStaff.role)) {
-      showBanner(`Permission denied: ${actorRole || 'User'} cannot reset PIN for ${resetPinStaff.role}.`);
+    if (!resetPinStaff) return;
+    setResetPinError(null);
+    const trimmedPin = newResetPin.trim();
+    if (!/^\d{4,8}$/.test(trimmedPin)) {
+      setResetPinError(lang === 'ne' ? 'PIN ४ देखि ८ अंकको नम्बर हुनुपर्छ।' : 'PIN must be 4 to 8 numeric digits.');
       return;
     }
-    const pinCheck = await validateProductionPin(newResetPin.trim(), appState.staffUsers, { excludeStaffId: resetPinStaff.id });
+    if (!canActorManageStaffMember(actorRole, resetPinStaff.role)) {
+      const msg = `Permission denied: ${actorRole || 'User'} cannot reset PIN for ${resetPinStaff.role}.`;
+      setResetPinError(msg);
+      return;
+    }
+    const pinCheck = await validateProductionPin(trimmedPin, appState.staffUsers, { excludeStaffId: resetPinStaff.id });
     if (!pinCheck.isValid) {
-      showBanner(pinCheck.error || 'Weak or duplicate PIN is not allowed.');
+      setResetPinError(pinCheck.error || 'Weak or duplicate PIN is not allowed.');
       return;
     }
     try {
-      const newHash = await hashPinWithSalt(newResetPin.trim(), resetPinStaff.salt);
+      const newHash = await hashPinWithSalt(trimmedPin, resetPinStaff.salt);
       const changedAt = new Date().toISOString();
       const updated = appState.staffUsers.map(s =>
         s.id === resetPinStaff.id
           ? { ...s, pinHash: newHash, mustChangePin: false, lastPinChangedAt: changedAt }
           : s
       );
-      onUpdateAppState(prev => ({ ...prev, staffUsers: updated }));
+      applyStaffUsersChange(updated);
       recordAudit('STAFF_PIN_RESET', resetPinStaff.id, `PIN updated for ${resetPinStaff.name}`);
       playChime('success');
+      const targetName = resetPinStaff.name;
       setResetPinStaff(null);
       setNewResetPin('');
-      showBanner(`Security PIN reset for ${resetPinStaff.name}.`);
+      setResetPinError(null);
+      showBanner(lang === 'ne' ? `${targetName} को नयाँ PIN सफलतापूर्वक सेभ भयो!` : `New security PIN saved for ${targetName}.`);
     } catch {
-      showBanner('Error updating PIN');
+      setResetPinError(lang === 'ne' ? 'PIN सेभ गर्न समस्या आयो।' : 'Error updating PIN');
     }
   };
 
   const handleEditStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
+    setEditStaffError(null);
     const original = appState.staffUsers.find(s => s.id === editingStaff.id);
-    if (!canActorAssignRole(actorRole, editingStaff.role, original?.role)) {
-      showBanner(`Permission denied: ${actorRole || 'User'} cannot assign role ${editingStaff.role}.`);
+    const roleChanged = original ? original.role !== editingStaff.role : true;
+    if (roleChanged && !canActorAssignRole(actorRole, editingStaff.role, original?.role)) {
+      setEditStaffError(`Permission denied: ${actorRole || 'User'} cannot assign role ${editingStaff.role}.`);
+      return;
+    }
+    if (!roleChanged && original && !canActorManageStaffMember(actorRole, original.role)) {
+      setEditStaffError(`Permission denied: ${actorRole || 'User'} cannot edit ${original.role}.`);
       return;
     }
     const updated = appState.staffUsers.map(s => s.id === editingStaff.id ? editingStaff : s);
-    onUpdateAppState(prev => ({ ...prev, staffUsers: updated }));
+    applyStaffUsersChange(updated);
     recordAudit('STAFF_PROFILE_UPDATED', editingStaff.id, `Updated details for ${editingStaff.name} (${editingStaff.role})`);
     playChime('success');
+    const updatedName = editingStaff.name;
     setEditingStaff(null);
-    showBanner(`Staff ${editingStaff.name} profile updated.`);
+    setEditStaffError(null);
+    showBanner(`Staff ${updatedName} profile updated.`);
+  };
+
+  const handleConfirmDeleteTarget = async () => {
+    if (!confirmDeleteTarget) return;
+    if (confirmDeleteTarget.kind === 'staff') {
+      const target = confirmDeleteTarget.staff;
+      if (target.id === currentSession?.staffId) {
+        showBanner(lang === 'ne' ? 'आफ्नै सक्रिय खाता हटाउन मिल्दैन।' : 'Cannot remove your own currently signed-in account.');
+        setConfirmDeleteTarget(null);
+        return;
+      }
+      if (!canActorManageStaffMember(actorRole, target.role)) {
+        showBanner(`Permission denied: ${actorRole || 'User'} cannot remove ${target.role}.`);
+        setConfirmDeleteTarget(null);
+        return;
+      }
+      const nextUsers = appState.staffUsers.filter(u => u.id !== target.id);
+      applyStaffUsersChange(nextUsers);
+      recordAudit('STAFF_ACCOUNT_REMOVED', target.id, `Removed staff ${target.name} (${target.role})`, 'WARNING');
+      playChime('beep');
+      setConfirmDeleteTarget(null);
+      showBanner(lang === 'ne' ? `${target.name} खाता हटाइयो।` : `Removed ${target.name} (${target.role}).`);
+      return;
+    }
+
+    if (confirmDeleteTarget.kind === 'cloudMember') {
+      const member = confirmDeleteTarget.member;
+      if (isProtectedCloudMember(member) || !canActorManageStaffMember(actorRole, member.role)) {
+        setCloudAccessError(lang === 'ne' ? 'यो मुख्य खाता हटाउन मिल्दैन।' : 'Protected owner/creator account cannot be removed.');
+        setConfirmDeleteTarget(null);
+        return;
+      }
+      setIsDeletingCloudItem(true);
+      setCloudAccessError(null);
+      try {
+        await deleteCloudMemberAccess({
+          businessId: business.businessId,
+          memberUid: member.uid,
+          ownerUid: cloudOwnerUid || undefined,
+          existingEmail: member.email,
+          actorRole,
+          existingTargetRole: member.role
+        });
+        recordAudit('CLOUD_MEMBER_REMOVED', member.uid, `Removed cloud member ${member.email} (${member.role})`, 'WARNING');
+        playChime('beep');
+        setConfirmDeleteTarget(null);
+        await refreshCloudAccessLists();
+        showBanner(lang === 'ne' ? `${member.name} को Cloud पहुँच हटाइयो।` : `Removed cloud access for ${member.email}.`);
+      } catch (err: any) {
+        setCloudAccessError(err?.message || 'Failed to remove cloud user.');
+        setConfirmDeleteTarget(null);
+      } finally {
+        setIsDeletingCloudItem(false);
+      }
+      return;
+    }
+
+    if (confirmDeleteTarget.kind === 'cloudInvite') {
+      const invite = confirmDeleteTarget.invite;
+      if (!canActorManageStaffMember(actorRole, invite.role)) {
+        setCloudAccessError(`Permission denied: ${actorRole || 'User'} cannot remove invite for ${invite.role}.`);
+        setConfirmDeleteTarget(null);
+        return;
+      }
+      setIsDeletingCloudItem(true);
+      setCloudAccessError(null);
+      try {
+        await deleteCloudStaffInvite(business.businessId, invite.inviteId, actorRole, invite.role);
+        recordAudit('CLOUD_INVITE_REMOVED', invite.inviteId, `Deleted invite for ${invite.email} (${invite.role})`, 'WARNING');
+        playChime('beep');
+        setConfirmDeleteTarget(null);
+        await refreshCloudAccessLists();
+        showBanner(lang === 'ne' ? `${invite.email} को निमन्त्रणा हटाइयो।` : `Deleted invite for ${invite.email}.`);
+      } catch (err: any) {
+        setCloudAccessError(err?.message || 'Failed to delete cloud invite.');
+        setConfirmDeleteTarget(null);
+      } finally {
+        setIsDeletingCloudItem(false);
+      }
+    }
   };
 
   const handleAddPaymentMethod = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPaymentName.trim()) return;
+    if (!canManagePayments || !newPaymentName.trim()) return;
     const newPm: PaymentMethodConfig = {
       id: 'pm-custom-' + Date.now().toString(36),
       name: newPaymentName.trim(),
@@ -1105,13 +1335,20 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
     };
     const nextList = [...paymentsList, newPm];
     setPaymentsList(nextList);
-    onUpdateAppState(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        ...appState.settings,
         paymentMethodsConfig: nextList
-      }
-    }));
+      });
+    } else {
+      onUpdateAppState(prev => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          paymentMethodsConfig: nextList
+        }
+      }));
+    }
     recordAudit('PAYMENT_METHOD_ADDED', newPm.id, `Added payment method ${newPm.name} (${newPm.type})`);
     playChime('success');
     setShowAddPaymentModal(false);
@@ -1122,15 +1359,23 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   };
 
   const handleRemovePaymentMethod = (id: string) => {
+    if (!canManagePayments) return;
     const nextList = paymentsList.filter(p => p.id !== id);
     setPaymentsList(nextList);
-    onUpdateAppState(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        ...appState.settings,
         paymentMethodsConfig: nextList
-      }
-    }));
+      });
+    } else {
+      onUpdateAppState(prev => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          paymentMethodsConfig: nextList
+        }
+      }));
+    }
     recordAudit('PAYMENT_METHOD_REMOVED', id, `Removed payment method ${id}`);
     playChime('beep');
     showBanner('Payment method removed.');
@@ -1162,34 +1407,40 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           </div>
         </div>
 
-        {isOwnerOrAdmin && (
+        {(isOwnerOrAdmin || canManagePayments) && (
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setActiveTab('payments')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors border border-emerald-200 shadow-2xs"
-            >
-              <QrCode className="h-4 w-4 text-emerald-600" />
-              <span>{lang === 'ne' ? 'भुक्तानी QR सेटअप' : 'Payment QRs'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('security')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-200 shadow-2xs"
-            >
-              <Globe className="h-4 w-4 text-indigo-600" />
-              <span>{lang === 'ne' ? 'वेबसाइट Download लिंक' : 'Website Download Link'}</span>
-            </button>
-
-            {onOpenSetupWizard && (
+            {canManagePayments && (
               <button
-                onClick={onOpenSetupWizard}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
+                type="button"
+                onClick={() => setActiveTab('payments')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors border border-emerald-200 shadow-2xs"
               >
-                <Sparkles className="h-4 w-4 text-amber-300" />
-                <span>Setup Wizard</span>
+                <QrCode className="h-4 w-4 text-emerald-600" />
+                <span>{lang === 'ne' ? 'भुक्तानी QR सेटअप' : 'Payment QRs'}</span>
               </button>
+            )}
+
+            {isOwnerOrAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('security')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-200 shadow-2xs"
+                >
+                  <Globe className="h-4 w-4 text-indigo-600" />
+                  <span>{lang === 'ne' ? 'वेबसाइट Download लिंक' : 'Website Download Link'}</span>
+                </button>
+
+                {onOpenSetupWizard && canCreateBusiness && (
+                  <button
+                    onClick={onOpenSetupWizard}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
+                  >
+                    <Sparkles className="h-4 w-4 text-amber-300" />
+                    <span>Setup Wizard</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -1206,19 +1457,19 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       {/* Main Admin / Manager Tab Navigation Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
         {[
-          { id: 'dashboard', label: 'Dashboard', icon: TrendingUp, adminOnly: false },
-          { id: 'profile', label: 'Business Profile', icon: Building2, adminOnly: true },
-          { id: 'staff', label: 'Users & Staff', icon: Users, adminOnly: false },
-          { id: 'roles', label: 'Roles & Permissions', icon: Lock, adminOnly: true },
-          { id: 'modules', label: 'Modules Control', icon: Layers, adminOnly: true },
-          { id: 'payments', label: 'Payment Methods', icon: CreditCard, adminOnly: true },
-          { id: 'receipt', label: 'Receipt Settings', icon: Receipt, adminOnly: true },
-          { id: 'taxes', label: 'Tax & Charges', icon: Percent, adminOnly: true },
-          { id: 'notifications', label: 'Notifications', icon: Bell, adminOnly: true },
-          { id: 'security', label: 'Security & Access', icon: ShieldCheck, adminOnly: true },
-          { id: 'audit', label: 'Audit Trail', icon: History, adminOnly: false }
+          { id: 'dashboard', label: 'Dashboard', icon: TrendingUp, allowed: true },
+          { id: 'profile', label: 'Business Profile', icon: Building2, allowed: isOwnerOrAdmin },
+          { id: 'staff', label: 'Users & Staff', icon: Users, allowed: true },
+          { id: 'roles', label: 'Roles & Permissions', icon: Lock, allowed: isOwnerOrAdmin },
+          { id: 'modules', label: 'Modules Control', icon: Layers, allowed: isOwnerOrAdmin },
+          { id: 'payments', label: 'Payment Methods', icon: CreditCard, allowed: canManagePayments },
+          { id: 'receipt', label: 'Receipt Settings', icon: Receipt, allowed: isOwnerOrAdmin },
+          { id: 'taxes', label: 'Tax & Charges', icon: Percent, allowed: canManageTaxes },
+          { id: 'notifications', label: 'Notifications', icon: Bell, allowed: isOwnerOrAdmin },
+          { id: 'security', label: 'Security & Access', icon: ShieldCheck, allowed: true },
+          { id: 'audit', label: 'Audit Trail', icon: History, allowed: true }
         ]
-          .filter(tab => isOwnerOrAdmin || !tab.adminOnly)
+          .filter(tab => tab.allowed)
           .map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1626,14 +1877,14 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {isOwnerOrAdmin && (
+              {canManageStaffRoster && (
                 <button
                   type="button"
                   onClick={() => setActiveTab('security')}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition-colors shadow-2xs"
                 >
                   <Globe className="h-4 w-4" />
-                  <span>{lang === 'ne' ? 'मोबाइल Gmail सिंक नियन्त्रण' : 'Mobile Gmail Sync'}</span>
+                  <span>{lang === 'ne' ? 'मोबाइल Gmail र PIN नियन्त्रण' : 'Mobile Gmail & PIN Control'}</span>
                 </button>
               )}
               <button
@@ -1645,7 +1896,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               </button>
 
               <button
-                onClick={() => setShowAddStaffModal(true)}
+                onClick={() => { setAddStaffError(null); setShowAddStaffModal(true); }}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
               >
                 <Plus className="h-4 w-4" />
@@ -1719,7 +1970,13 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                     </td>
 
                     <td className="py-3 px-3 text-slate-500">
-                      <span>{staff.phone || staff.email || '—'}</span>
+                      <span>
+                        {staff.phone ||
+                          (staff.role === 'SUPER_ADMIN' || isMasterOwnerEmail(staff.email)
+                            ? 'Protected'
+                            : staff.email) ||
+                          '—'}
+                      </span>
                     </td>
 
                     <td className="py-3 px-3">
@@ -1737,30 +1994,43 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                       {canActorManageStaffMember(actorRole, staff.role) ? (
                         <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => setEditingStaff(staff)}
+                            type="button"
+                            onClick={() => { setEditStaffError(null); setEditingStaff(staff); }}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-                            title="Edit staff profile & role"
+                            title={lang === 'ne' ? 'विवरण र पद सच्याउनुहोस्' : 'Edit staff profile & role'}
                           >
                             <Edit2 className="h-3.5 w-3.5" />
                           </button>
                           <button
-                            onClick={() => { setResetPinStaff(staff); setNewResetPin(''); }}
+                            type="button"
+                            onClick={() => { setResetPinError(null); setResetPinStaff(staff); setNewResetPin(''); }}
                             className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title="Reset security PIN"
+                            title={lang === 'ne' ? 'PIN परिवर्तन / सेभ गर्नुहोस्' : 'Change & save security PIN'}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleToggleStaffStatus(staff)}
                             className={`p-1.5 rounded-lg transition-colors ${
                               staff.isActive 
-                                ? 'text-rose-600 hover:bg-rose-50' 
+                                ? 'text-amber-600 hover:bg-amber-50' 
                                 : 'text-emerald-600 hover:bg-emerald-50'
                             }`}
                             title={staff.isActive ? 'Disable terminal access' : 'Activate staff'}
                           >
                             {staff.isActive ? <PauseCircle className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                           </button>
+                          {staff.id !== currentSession?.staffId && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteTarget({ kind: 'staff', staff })}
+                              className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors"
+                              title={lang === 'ne' ? 'कर्मचारी / युजर हटाउनुहोस्' : 'Remove staff / user'}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <span className="text-[10px] font-semibold text-slate-400">
@@ -1884,11 +2154,16 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {cloudMembers.map(m => {
-                          const canManageTarget = canActorManageStaffMember(actorRole, m.role);
+                          const protectedMember = isProtectedCloudMember(m);
+                          const canManageTarget = !protectedMember && canActorManageStaffMember(actorRole, m.role);
                           return (
                             <tr key={m.uid}>
-                              <td className="py-2.5 px-3 font-bold text-slate-900">{m.name}</td>
-                              <td className="py-2.5 px-3 font-mono text-slate-600">{m.email}</td>
+                              <td className="py-2.5 px-3 font-bold text-slate-900">
+                                {m.role === 'SUPER_ADMIN' || isMasterOwnerEmail(m.email) ? 'Super Admin' : m.name}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-slate-600">
+                                {m.role === 'SUPER_ADMIN' || isMasterOwnerEmail(m.email) ? 'Protected' : m.email}
+                              </td>
                               <td className="py-2.5 px-3">
                                 <select
                                   value={m.role}
@@ -1912,17 +2187,27 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                               </td>
                               <td className="py-2.5 px-3 text-right">
                                 {canManageTarget ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleCloudMemberActive(m)}
-                                    className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
-                                      m.isActive
-                                        ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                    }`}
-                                  >
-                                    {m.isActive ? 'Revoke Device' : 'Re-Activate'}
-                                  </button>
+                                  <div className="inline-flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleCloudMemberActive(m)}
+                                      className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                                        m.isActive
+                                          ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                      }`}
+                                    >
+                                      {m.isActive ? 'Revoke Device' : 'Re-Activate'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteTarget({ kind: 'cloudMember', member: m })}
+                                      className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+                                      title={lang === 'ne' ? 'Cloud युजर हटाउनुहोस्' : 'Remove cloud user'}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
                                 ) : (
                                   <span className="text-[10px] font-semibold text-slate-400">Protected</span>
                                 )}
@@ -1951,7 +2236,9 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                         {cloudInvites.map(inv => (
                           <tr key={inv.inviteId}>
                             <td className="py-2 px-3 font-semibold text-slate-900">{inv.staffName}</td>
-                            <td className="py-2 px-3 font-mono text-slate-600">{inv.email}</td>
+                            <td className="py-2 px-3 font-mono text-slate-600">
+                              {isMasterOwnerEmail(inv.email) ? 'Protected' : inv.email}
+                            </td>
                             <td className="py-2 px-3 font-bold">{inv.role}</td>
                             <td className="py-2 px-3">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
@@ -1980,9 +2267,19 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleRevokeCloudInvite(inv)}
-                                    className="px-2.5 py-1 rounded-lg font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                                    className="px-2.5 py-1 rounded-lg font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
                                   >
                                     Revoke
+                                  </button>
+                                )}
+                                {canActorManageStaffMember(actorRole, inv.role) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteTarget({ kind: 'cloudInvite', invite: inv })}
+                                    className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+                                    title={lang === 'ne' ? 'निमन्त्रणा हटाउनुहोस्' : 'Delete invite'}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
                                   </button>
                                 )}
                               </div>
@@ -2715,13 +3012,11 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 mt-2">
-                <input 
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.5"
+                <NumberInput
+                  min={0}
+                  max={100}
                   value={vatRate}
-                  onChange={e => setVatRate(parseFloat(e.target.value) || 0)}
+                  onValueChange={val => setVatRate(val)}
                   disabled={!vatEnabled}
                   className="w-20 px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono-num font-bold"
                 />
@@ -2740,13 +3035,11 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                 />
               </div>
               <div className="flex items-center gap-2 mt-2">
-                <input 
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.5"
+                <NumberInput
+                  min={0}
+                  max={100}
                   value={serviceChargeRate}
-                  onChange={e => setServiceChargeRate(parseFloat(e.target.value) || 0)}
+                  onValueChange={val => setServiceChargeRate(val)}
                   disabled={!serviceChargeEnabled}
                   className="w-20 px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono-num font-bold"
                 />
@@ -2876,107 +3169,109 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
       {/* TAB CONTENT: 10. SECURITY, OWNER LOCK & CLOUD SYNC */}
       {activeTab === 'security' && (
         <div className="space-y-5 animate-in fade-in duration-150">
-          <form onSubmit={handleSaveSecurity} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-3">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Owner Control Lock & Security Policies</h2>
-                <p className="text-xs text-slate-500">
-                  Lock role switching on staff terminals and configure mandatory PIN authorizations
-                </p>
-              </div>
-              <button
-                type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
-              >
-                <Check className="h-4 w-4 text-emerald-400" />
-                <span>Save Policies</span>
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              {/* Strict Owner Control Lock Toggle */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
-                <div className="max-w-xl">
-                  <div className="flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-amber-700" />
-                    <h4 className="font-bold text-amber-950">
-                      App Creator & Owner Control Lock ({MASTER_OWNER_EMAIL})
-                    </h4>
-                  </div>
-                  <p className="text-amber-900 text-[11px] mt-1 leading-relaxed">
-                    {lang === 'ne'
-                      ? 'सक्रिय हुँदा कर्मचारीको मोबाइल र काउन्टरबाट सिधै भूमिका (Role) बदल्न र डेमो पिन हेर्न मिल्दैन। App Creator Google लग-इन वा Owner PIN बाट मात्र भूमिका बदल्न र स्टाफ थप्न/हटाउन सकिन्छ।'
-                      : 'When ON (Recommended), counter and mobile terminals cannot switch roles freely or view demo PIN shortcuts. Only the verified App Creator Google login or Owner PIN holds control.'}
+          {isOwnerOrAdmin && (
+            <form onSubmit={handleSaveSecurity} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xs space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Owner Control Lock & Security Policies</h2>
+                  <p className="text-xs text-slate-500">
+                    Lock role switching on staff terminals and configure mandatory PIN authorizations
                   </p>
                 </div>
-                <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-amber-300 shadow-2xs">
-                  <input
-                    type="checkbox"
-                    checked={securityForm.ownerControlLocked !== false}
-                    onChange={e => setSecurityForm({ ...securityForm, ownerControlLocked: e.target.checked })}
-                    className="rounded text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="font-bold text-slate-900">
-                    {securityForm.ownerControlLocked !== false ? 'LOCKED (Creator/Owner)' : 'Unlocked (Demo)'}
-                  </span>
-                </label>
-              </div>
-
-              {/* Terminal Auto Lock */}
-              <div className="p-4 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
-                <div>
-                  <h4 className="font-bold text-slate-900">Terminal Session Auto-Lock</h4>
-                  <p className="text-slate-500 text-[11px]">Automatically lock POS billing counter after inactivity to prevent unauthorized access</p>
-                </div>
-                <select
-                  value={securityForm.sessionTimeoutMinutes}
-                  onChange={e => setSecurityForm({ ...securityForm, sessionTimeoutMinutes: parseInt(e.target.value) || 60 })}
-                  className="px-3 py-2 border border-slate-200 rounded-xl bg-slate-50 font-bold text-slate-800 focus:ring-1 focus:ring-slate-900"
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-2xs"
                 >
-                  <option value={15}>15 Minutes</option>
-                  <option value={30}>30 Minutes</option>
-                  <option value={60}>60 Minutes (Standard)</option>
-                  <option value={120}>120 Minutes</option>
-                </select>
+                  <Check className="h-4 w-4 text-emerald-400" />
+                  <span>Save Policies</span>
+                </button>
               </div>
 
-              {/* Mandatory PIN Requirements */}
-              <div className="p-4 border border-slate-200 rounded-xl space-y-3">
-                <h4 className="font-bold text-slate-900">Supervisor PIN Authorizations</h4>
-                <p className="text-slate-500 text-[11px]">Require authorized Manager or Admin PIN verification for high-risk operations</p>
+              <div className="space-y-4 text-xs">
+                {/* Strict Owner Control Lock Toggle */}
+                <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
+                  <div className="max-w-xl">
+                    <div className="flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-amber-700" />
+                      <h4 className="font-bold text-amber-950">
+                        App Creator & Owner Control Lock
+                      </h4>
+                    </div>
+                    <p className="text-amber-900 text-[11px] mt-1 leading-relaxed">
+                      {lang === 'ne'
+                        ? 'सक्रिय हुँदा कर्मचारीको मोबाइल र काउन्टरबाट सिधै भूमिका (Role) बदल्न र डेमो पिन हेर्न मिल्दैन। App Creator Google लग-इन वा Owner PIN बाट मात्र भूमिका बदल्न र स्टाफ थप्न/हटाउन सकिन्छ।'
+                        : 'When ON (Recommended), counter and mobile terminals cannot switch roles freely or view demo PIN shortcuts. Only the verified App Creator Google login or Owner PIN holds control.'}
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-amber-300 shadow-2xs">
+                    <input
+                      type="checkbox"
+                      checked={securityForm.ownerControlLocked !== false}
+                      onChange={e => setSecurityForm({ ...securityForm, ownerControlLocked: e.target.checked })}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="font-bold text-slate-900">
+                      {securityForm.ownerControlLocked !== false ? 'LOCKED (Creator/Owner)' : 'Unlocked (Demo)'}
+                    </span>
+                  </label>
+                </div>
 
-                <div className="space-y-2 pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-800 font-medium">Require PIN to apply custom bill discounts</span>
-                    <input
-                      type="checkbox"
-                      checked={securityForm.requirePinForDiscounts}
-                      onChange={e => setSecurityForm({ ...securityForm, requirePinForDiscounts: e.target.checked })}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
+                {/* Terminal Auto Lock */}
+                <div className="p-4 border border-slate-200 rounded-xl flex items-center justify-between flex-wrap gap-4">
+                  <div>
+                    <h4 className="font-bold text-slate-900">Terminal Session Auto-Lock</h4>
+                    <p className="text-slate-500 text-[11px]">Automatically lock POS billing counter after inactivity to prevent unauthorized access</p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-800 font-medium">Require PIN to void submitted order items</span>
-                    <input
-                      type="checkbox"
-                      checked={securityForm.requirePinForVoidOrder}
-                      onChange={e => setSecurityForm({ ...securityForm, requirePinForVoidOrder: e.target.checked })}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-800 font-medium">Require PIN to finalize End-of-Day cash closing</span>
-                    <input
-                      type="checkbox"
-                      checked={securityForm.requirePinForDayClose}
-                      onChange={e => setSecurityForm({ ...securityForm, requirePinForDayClose: e.target.checked })}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
+                  <select
+                    value={securityForm.sessionTimeoutMinutes}
+                    onChange={e => setSecurityForm({ ...securityForm, sessionTimeoutMinutes: parseInt(e.target.value) || 60 })}
+                    className="px-3 py-2 border border-slate-200 rounded-xl bg-slate-50 font-bold text-slate-800 focus:ring-1 focus:ring-slate-900"
+                  >
+                    <option value={15}>15 Minutes</option>
+                    <option value={30}>30 Minutes</option>
+                    <option value={60}>60 Minutes (Standard)</option>
+                    <option value={120}>120 Minutes</option>
+                  </select>
+                </div>
+
+                {/* Mandatory PIN Requirements */}
+                <div className="p-4 border border-slate-200 rounded-xl space-y-3">
+                  <h4 className="font-bold text-slate-900">Supervisor PIN Authorizations</h4>
+                  <p className="text-slate-500 text-[11px]">Require authorized Manager or Admin PIN verification for high-risk operations</p>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-800 font-medium">Require PIN to apply custom bill discounts</span>
+                      <input
+                        type="checkbox"
+                        checked={securityForm.requirePinForDiscounts}
+                        onChange={e => setSecurityForm({ ...securityForm, requirePinForDiscounts: e.target.checked })}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-800 font-medium">Require PIN to void submitted order items</span>
+                      <input
+                        type="checkbox"
+                        checked={securityForm.requirePinForVoidOrder}
+                        onChange={e => setSecurityForm({ ...securityForm, requirePinForVoidOrder: e.target.checked })}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-800 font-medium">Require PIN to finalize End-of-Day cash closing</span>
+                      <input
+                        type="checkbox"
+                        checked={securityForm.requirePinForDayClose}
+                        onChange={e => setSecurityForm({ ...securityForm, requirePinForDayClose: e.target.checked })}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </form>
+            </form>
+          )}
 
           {/* Card 2: Cloud Sync Connection & Owner PIN Rotation */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 text-xs">
@@ -3001,12 +3296,18 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">App Creator Account:</span>
-                  <span className="font-mono font-bold text-slate-900">{MASTER_OWNER_EMAIL}</span>
+                  <span className="text-slate-500">Platform Governance:</span>
+                  <span className="font-bold text-slate-900">Super Admin Protected</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Signed-in Google Email:</span>
-                  <span className="font-mono font-semibold text-emerald-800">{firebaseUserEmail || 'Not signed in'}</span>
+                  <span className="font-mono font-semibold text-emerald-800">
+                    {firebaseUserEmail && !isMasterOwnerEmail(firebaseUserEmail)
+                      ? firebaseUserEmail
+                      : isMasterOwnerVerified
+                      ? 'Super Admin (Hidden)'
+                      : 'Not signed in'}
+                  </span>
                 </div>
               </div>
 
@@ -3058,11 +3359,11 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">New Owner PIN (4–6 digits)</label>
+                  <label className="block font-semibold text-slate-700 mb-1">New Owner / Admin PIN (4–8 digits)</label>
                   <input
                     type="password"
                     inputMode="numeric"
-                    maxLength={6}
+                    maxLength={8}
                     value={ownerNewPin}
                     onChange={e => setOwnerNewPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="••••"
@@ -3074,7 +3375,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                   <input
                     type="password"
                     inputMode="numeric"
-                    maxLength={6}
+                    maxLength={8}
                     value={ownerConfirmPin}
                     onChange={e => setOwnerConfirmPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="••••"
@@ -3085,12 +3386,12 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
 
               <button
                 type="button"
-                disabled={!isOwnerOrAdmin || isUpdatingPin}
+                disabled={!canManageStaffRoster || isUpdatingPin}
                 onClick={handleUpdateOwnerMasterPin}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white font-bold rounded-xl shadow-2xs transition-colors"
               >
                 <KeyRound className="h-3.5 w-3.5 text-amber-300" />
-                <span>{isUpdatingPin ? 'Updating PIN...' : 'Update Owner PIN'}</span>
+                <span>{isUpdatingPin ? (lang === 'ne' ? 'सेभ हुँदैछ...' : 'Saving PIN...') : (lang === 'ne' ? 'नयाँ Owner PIN सेभ गर्नुहोस्' : 'Save New Owner PIN')}</span>
               </button>
             </div>
           </div>
@@ -3267,11 +3568,16 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {cloudMembers.map(m => {
-                            const canManageTarget = canActorManageStaffMember(actorRole, m.role);
+                            const protectedMember = isProtectedCloudMember(m);
+                            const canManageTarget = !protectedMember && canActorManageStaffMember(actorRole, m.role);
                             return (
                               <tr key={m.uid}>
-                                <td className="py-2.5 px-3 font-bold text-slate-900">{m.name}</td>
-                                <td className="py-2.5 px-3 font-mono text-slate-600">{m.email}</td>
+                                <td className="py-2.5 px-3 font-bold text-slate-900">
+                                  {m.role === 'SUPER_ADMIN' || isMasterOwnerEmail(m.email) ? 'Super Admin' : m.name}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-slate-600">
+                                  {m.role === 'SUPER_ADMIN' || isMasterOwnerEmail(m.email) ? 'Protected' : m.email}
+                                </td>
                                 <td className="py-2.5 px-3">
                                   <select
                                     value={m.role}
@@ -3294,18 +3600,30 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                                   </span>
                                 </td>
                                 <td className="py-2.5 px-3 text-right">
-                                  {canManageTarget && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleCloudMemberActive(m)}
-                                      className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
-                                        m.isActive
-                                          ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                      }`}
-                                    >
-                                      {m.isActive ? 'Revoke Device' : 'Re-Activate'}
-                                    </button>
+                                  {canManageTarget ? (
+                                    <div className="inline-flex items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleCloudMemberActive(m)}
+                                        className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                                          m.isActive
+                                            ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                        }`}
+                                      >
+                                        {m.isActive ? 'Revoke Device' : 'Re-Activate'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteTarget({ kind: 'cloudMember', member: m })}
+                                        className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+                                        title={lang === 'ne' ? 'Cloud युजर हटाउनुहोस्' : 'Remove cloud user'}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-semibold text-slate-400">Protected</span>
                                   )}
                                 </td>
                               </tr>
@@ -3336,7 +3654,9 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                           {cloudInvites.map(inv => (
                             <tr key={inv.inviteId}>
                               <td className="py-2 px-3 font-semibold text-slate-900">{inv.staffName}</td>
-                              <td className="py-2 px-3 font-mono text-slate-600">{inv.email}</td>
+                              <td className="py-2 px-3 font-mono text-slate-600">
+                                {isMasterOwnerEmail(inv.email) ? 'Protected' : inv.email}
+                              </td>
                               <td className="py-2 px-3 font-bold">{inv.role}</td>
                               <td className="py-2 px-3">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
@@ -3365,9 +3685,19 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handleRevokeCloudInvite(inv)}
-                                      className="px-2.5 py-1 rounded-lg font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                                      className="px-2.5 py-1 rounded-lg font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
                                     >
                                       Revoke Invite
+                                    </button>
+                                  )}
+                                  {canActorManageStaffMember(actorRole, inv.role) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteTarget({ kind: 'cloudInvite', invite: inv })}
+                                      className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+                                      title={lang === 'ne' ? 'निमन्त्रणा हटाउनुहोस्' : 'Delete invite'}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
                                     </button>
                                   )}
                                 </div>
@@ -3497,10 +3827,17 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-bold text-sm text-slate-900">Add Staff Account ({business.businessName})</h3>
-              <button onClick={() => setShowAddStaffModal(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+              <button onClick={() => { setShowAddStaffModal(false); setAddStaffError(null); }} className="p-1 text-slate-400 hover:text-slate-600 rounded">
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {addStaffError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{addStaffError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleCreateStaff} className="space-y-3 text-xs">
               <div>
@@ -3541,14 +3878,15 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Terminal Security PIN (4-Digits) *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Terminal Security PIN (4–8 Digits) *</label>
                 <input 
                   type="password"
-                  maxLength={6}
+                  inputMode="numeric"
+                  maxLength={8}
                   required
-                  placeholder="****"
+                  placeholder="••••"
                   value={newStaffPin}
-                  onChange={e => setNewStaffPin(e.target.value)}
+                  onChange={e => { setNewStaffPin(e.target.value.replace(/\D/g, '')); setAddStaffError(null); }}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-center tracking-widest text-sm"
                 />
               </div>
@@ -3579,7 +3917,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddStaffModal(false)}
+                  onClick={() => { setShowAddStaffModal(false); setAddStaffError(null); }}
                   className="px-3 py-1.5 text-slate-600 hover:text-slate-800"
                 >
                   Cancel
@@ -3602,10 +3940,17 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-bold text-sm text-slate-900">Edit Staff Member ({editingStaff.name})</h3>
-              <button onClick={() => setEditingStaff(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+              <button onClick={() => { setEditingStaff(null); setEditStaffError(null); }} className="p-1 text-slate-400 hover:text-slate-600 rounded">
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {editStaffError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{editStaffError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleEditStaffSubmit} className="space-y-3 text-xs">
               <div>
@@ -3647,9 +3992,11 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                   onChange={e => setEditingStaff({ ...editingStaff, role: e.target.value as StaffRole })}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white font-semibold text-slate-800"
                 >
-                  {assignableRoles.map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
+                  {defaultRoles
+                    .filter(r => r === editingStaff.role || assignableRoles.includes(r))
+                    .map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
                 </select>
               </div>
 
@@ -3658,7 +4005,11 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
                   <label className="block font-semibold text-slate-700 mb-1">Email</label>
                   <input 
                     type="email"
-                    value={editingStaff.email || ''}
+                    value={
+                      editingStaff.role === 'SUPER_ADMIN' || isMasterOwnerEmail(editingStaff.email)
+                        ? ''
+                        : (editingStaff.email || '')
+                    }
                     onChange={e => setEditingStaff({ ...editingStaff, email: e.target.value })}
                     className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs"
                   />
@@ -3677,7 +4028,7 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setEditingStaff(null)}
+                  onClick={() => { setEditingStaff(null); setEditStaffError(null); }}
                   className="px-3 py-1.5 text-slate-600 hover:text-slate-800"
                 >
                   Cancel
@@ -3701,27 +4052,43 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <KeyRound className="h-4 w-4 text-indigo-600" />
-                <h3 className="font-bold text-sm text-slate-900">Reset Terminal PIN</h3>
+                <h3 className="font-bold text-sm text-slate-900">
+                  {lang === 'ne' ? 'PIN परिवर्तन गरी सेभ गर्नुहोस्' : 'Change & Save Security PIN'}
+                </h3>
               </div>
-              <button onClick={() => setResetPinStaff(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+              <button onClick={() => { setResetPinStaff(null); setResetPinError(null); }} className="p-1 text-slate-400 hover:text-slate-600 rounded">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <p className="text-xs text-slate-500">
-              Set a new 4-digit security PIN for <span className="font-bold text-slate-800">{resetPinStaff.name}</span>. The PIN is salted and hashed cryptographically.
+              {lang === 'ne'
+                ? `${resetPinStaff.name} (${resetPinStaff.role}) को लागि ४ देखि ८ अंकको नयाँ सुरक्षित PIN राख्नुहोस्।`
+                : `Set a new 4–8 digit security PIN for `}
+              {lang !== 'ne' && <span className="font-bold text-slate-800">{resetPinStaff.name} ({resetPinStaff.role})</span>}
+              {lang !== 'ne' && '. The PIN is salted and hashed cryptographically.'}
             </p>
+
+            {resetPinError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{resetPinError}</span>
+              </div>
+            )}
 
             <form onSubmit={handleResetPinSubmit} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">New 4-Digit Security PIN *</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {lang === 'ne' ? 'नयाँ PIN (४–८ अंक) *' : 'New Security PIN (4–8 digits) *'}
+                </label>
                 <input 
                   type="password"
-                  maxLength={6}
+                  inputMode="numeric"
+                  maxLength={8}
                   required
-                  placeholder="****"
+                  placeholder="••••••"
                   value={newResetPin}
-                  onChange={e => setNewResetPin(e.target.value)}
+                  onChange={e => { setNewResetPin(e.target.value.replace(/\D/g, '')); setResetPinError(null); }}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono text-center tracking-widest text-lg"
                 />
               </div>
@@ -3729,16 +4096,17 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setResetPinStaff(null)}
+                  onClick={() => { setResetPinStaff(null); setResetPinError(null); }}
                   className="px-3 py-1.5 text-slate-600 hover:text-slate-800"
                 >
-                  Cancel
+                  {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-2xs"
+                  disabled={newResetPin.length < 4}
+                  className="px-4 py-2 font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-xl shadow-2xs"
                 >
-                  Update PIN
+                  {lang === 'ne' ? 'नयाँ PIN सेभ गर्नुहोस्' : 'Save New PIN'}
                 </button>
               </div>
             </form>
@@ -3859,14 +4227,74 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           showBanner(`Invitation created for ${invite.emailOrPhone}`);
         }}
         onStaffActivated={(staff) => {
-          onUpdateAppState(prev => ({
-            ...prev,
-            staffUsers: [...prev.staffUsers, staff]
-          }));
+          applyStaffUsersChange([...appState.staffUsers, staff]);
           recordAudit('STAFF_INVITATION_ACCEPTED', staff.id, `Staff ${staff.name} accepted invitation for ${business.businessName}`);
           showBanner(`Staff member ${staff.name} is now active.`);
         }}
       />
+
+      {/* Remove Staff / Cloud User / Cloud Invite Confirmation Modal */}
+      {confirmDeleteTarget && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-rose-700">
+                <Trash2 className="h-4 w-4" />
+                <h3 className="font-bold text-sm">
+                  {lang === 'ne' ? 'हटाउने पुष्टि गर्नुहोस्' : 'Confirm Removal'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingCloudItem}
+                onClick={() => setConfirmDeleteTarget(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-slate-600 leading-relaxed">
+              {confirmDeleteTarget.kind === 'staff' && (
+                lang === 'ne'
+                  ? `के तपाईं पक्का "${confirmDeleteTarget.staff.name}" (@${confirmDeleteTarget.staff.username}, ${confirmDeleteTarget.staff.role}) को टर्मिनल खाता र PIN हटाउन चाहनुहुन्छ?`
+                  : `Remove "${confirmDeleteTarget.staff.name}" (@${confirmDeleteTarget.staff.username}, ${confirmDeleteTarget.staff.role}) and their PIN access from this workspace?`
+              )}
+              {confirmDeleteTarget.kind === 'cloudMember' && (
+                lang === 'ne'
+                  ? `के तपाईं पक्का "${confirmDeleteTarget.member.role === 'SUPER_ADMIN' || isMasterOwnerEmail(confirmDeleteTarget.member.email) ? 'Super Admin' : confirmDeleteTarget.member.name}" (${confirmDeleteTarget.member.role === 'SUPER_ADMIN' || isMasterOwnerEmail(confirmDeleteTarget.member.email) ? 'Protected' : confirmDeleteTarget.member.email}) को Cloud मोबाइल पहुँच हटाउन चाहनुहुन्छ?`
+                  : `Remove cloud workspace access for "${confirmDeleteTarget.member.role === 'SUPER_ADMIN' || isMasterOwnerEmail(confirmDeleteTarget.member.email) ? 'Super Admin' : confirmDeleteTarget.member.name}" (${confirmDeleteTarget.member.role === 'SUPER_ADMIN' || isMasterOwnerEmail(confirmDeleteTarget.member.email) ? 'Protected' : confirmDeleteTarget.member.email})? They will no longer sync or log into this workspace.`
+              )}
+              {confirmDeleteTarget.kind === 'cloudInvite' && (
+                lang === 'ne'
+                  ? `के तपाईं पक्का "${confirmDeleteTarget.invite.staffName}" (${isMasterOwnerEmail(confirmDeleteTarget.invite.email) ? 'Protected' : confirmDeleteTarget.invite.email}) को निमन्त्रणा मेटाउन चाहनुहुन्छ?`
+                  : `Delete the Gmail invitation for "${confirmDeleteTarget.invite.staffName}" (${isMasterOwnerEmail(confirmDeleteTarget.invite.email) ? 'Protected' : confirmDeleteTarget.invite.email})?`
+              )}
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingCloudItem}
+                onClick={() => setConfirmDeleteTarget(null)}
+                className="px-3.5 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingCloudItem}
+                onClick={() => void handleConfirmDeleteTarget()}
+                className="px-4 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-40 rounded-xl shadow-2xs"
+              >
+                {isDeletingCloudItem
+                  ? (lang === 'ne' ? 'हटाउँदै...' : 'Removing...')
+                  : (lang === 'ne' ? 'हटाउनुहोस्' : 'Confirm Remove')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Multi-Tenant Data Isolation Test Runner Modal */}
       <BusinessDataIsolationTestModal

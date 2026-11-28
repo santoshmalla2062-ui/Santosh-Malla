@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   Building, 
   ShieldCheck, 
@@ -117,7 +118,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setFormData({ ...settings });
     setLogoUploadError(null);
     setLogoPreviewFailed(false);
-  }, [settings.businessId, settings.logoUrl]);
+  }, [
+    settings.businessId,
+    settings.logoUrl,
+    settings.enableVat,
+    settings.vatRatePercent,
+    settings.enableServiceCharge,
+    settings.serviceChargePercent,
+    settings.currencySymbol,
+    settings.fonepayMerchantName,
+    settings.paymentMethodsConfig
+  ]);
 
   // Staff creation modal
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
@@ -152,8 +163,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     strictTaxInvoiceLock: true
   };
 
-  // Edit Staff Profile modal
+  // Edit Staff Profile modal & confirmation states
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
+  const [editStaffError, setEditStaffError] = useState<string | null>(null);
+  const [confirmDeleteStaff, setConfirmDeleteStaff] = useState<StaffUser | null>(null);
 
   // Confirmation modal for sample data reset
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -279,6 +292,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const currentSectionMeta = SECTIONS.find(s => s.id === activeSubTab) || SECTIONS[0];
   const canAccessCurrentSection = userRole ? hasPermission(userRole, currentSectionMeta.requiredAction) : false;
   const canModifyConfig = userRole ? hasPermission(userRole, 'MODIFY_TAX_CONFIG') : false;
+  const canManageProfile = userRole ? hasPermission(userRole, 'MANAGE_BUSINESS_PROFILE') : false;
+  const canManagePaymentMethods = userRole ? hasPermission(userRole, 'MANAGE_PAYMENT_METHODS') : false;
   const canManageStaff = canActorManageStaff(userRole) || (userRole ? hasPermission(userRole, 'MANAGE_BUSINESS_STAFF') : false);
   const canImportBackup = userRole === 'ADMIN' || userRole === 'OWNER' || userRole === 'SUPER_ADMIN';
   const assignableRoles = getAssignableRolesForActor(userRole);
@@ -303,7 +318,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!canModifyConfig) {
+    if (!canManageProfile) {
       setLogoUploadError('Permission denied: Only Owner or Admin can change the business logo.');
       return;
     }
@@ -322,8 +337,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canModifyConfig) {
-      setNotification({ type: 'error', message: 'Permission denied: Only authorized roles can update business profiles and tax rates.' });
+    if (!canManageProfile) {
+      setNotification({ type: 'error', message: 'Permission denied: Only Owner or Admin can update business profiles.' });
       return;
     }
     const rawLogo = formData.logoUrl?.trim();
@@ -359,6 +374,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setSaveSuccess(false);
       setNotification(null);
     }, 3500);
+  };
+
+  const handleTaxSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canModifyConfig) {
+      setNotification({ type: 'error', message: 'Permission denied: Only Owner, Admin, or Manager can update tax rates.' });
+      return;
+    }
+    const updatedSettings: BusinessSettings = {
+      ...appState.settings,
+      enableVat: formData.enableVat,
+      vatRatePercent: Number(formData.vatRatePercent) || 0,
+      enableServiceCharge: formData.enableServiceCharge,
+      serviceChargePercent: Number(formData.serviceChargePercent) || 0,
+      currencySymbol: formData.currencySymbol || 'Rs.',
+      fonepayMerchantName: formData.fonepayMerchantName,
+      irdSettings: formData.irdSettings
+    };
+    onUpdateSettings(updatedSettings);
+    setSaveSuccess(true);
+    setNotification({ type: 'success', message: lang === 'ne' ? 'कर र शुल्क सेटिङ सेभ भयो!' : 'Tax & service charge policy saved!' });
+    setTimeout(() => {
+      setSaveSuccess(false);
+      setNotification(null);
+    }, 3500);
+  };
+
+  const handleTogglePaymentMethod = (paymentId: string) => {
+    if (!canManagePaymentMethods) {
+      setNotification({ type: 'error', message: 'Permission denied: Only authorized roles can modify payment channels.' });
+      return;
+    }
+    const currentMethods = appState.settings.paymentMethodsConfig || DEFAULT_PAYMENT_METHODS;
+    const nextMethods = currentMethods.map(pm =>
+      pm.id === paymentId ? { ...pm, enabled: !pm.enabled } : pm
+    );
+    const updatedSettings: BusinessSettings = {
+      ...appState.settings,
+      paymentMethodsConfig: nextMethods
+    };
+    setFormData(prev => ({ ...prev, paymentMethodsConfig: nextMethods }));
+    onUpdateSettings(updatedSettings);
+    setNotification({
+      type: 'success',
+      message: lang === 'ne' ? 'भुक्तानी माध्यमको अवस्था अपडेट भयो।' : 'Payment channel status updated.'
+    });
+    setTimeout(() => setNotification(null), 2500);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,15 +468,57 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setTimeout(() => setNotification(null), 2500);
   };
 
+  const handleConfirmDeleteStaff = () => {
+    if (!confirmDeleteStaff || !canManageStaff || !onUpdateStaffUsers) {
+      setConfirmDeleteStaff(null);
+      return;
+    }
+    if (confirmDeleteStaff.id === currentSession?.staffId) {
+      setNotification({
+        type: 'error',
+        message: lang === 'ne'
+          ? 'हाल लग-इन भएको आफ्नै खाता हटाउन मिल्दैन।'
+          : 'You cannot remove the currently signed-in account.'
+      });
+      setConfirmDeleteStaff(null);
+      return;
+    }
+    if (!canActorManageStaffMember(userRole, confirmDeleteStaff.role)) {
+      setNotification({
+        type: 'error',
+        message: `Permission denied: ${userRole || 'Staff'} cannot remove ${confirmDeleteStaff.role} account.`
+      });
+      setConfirmDeleteStaff(null);
+      return;
+    }
+    const removedName = confirmDeleteStaff.name;
+    const updated = appState.staffUsers.filter(s => s.id !== confirmDeleteStaff.id);
+    onUpdateStaffUsers(updated);
+    setConfirmDeleteStaff(null);
+    setNotification({
+      type: 'success',
+      message: lang === 'ne'
+        ? `${removedName} को खाता सफलतापूर्वक हटाइयो।`
+        : `${removedName} removed from staff list.`
+    });
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   const handleCreateStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageStaff || !onUpdateStaffUsers) return;
     if (!canActorAssignRole(userRole, newRole)) {
-      setNotification({ type: 'error', message: `Permission denied: ${userRole || 'Staff'} cannot create ${newRole} accounts.` });
+      const msg = `Permission denied: ${userRole || 'Staff'} cannot create ${newRole} accounts.`;
+      setPinModalError(msg);
+      setNotification({ type: 'error', message: msg });
       return;
     }
-    if (!newUsername.trim() || !newName.trim() || newPin.length < 4) {
-      setNotification({ type: 'error', message: 'Please provide valid username, name, and 4-digit PIN.' });
+    if (!newUsername.trim() || !newName.trim() || newPin.trim().length < 4) {
+      const msg = lang === 'ne'
+        ? 'कृपया युजरनेम, नाम र कम्तीमा ४ अंकको PIN राख्नुहोस्।'
+        : 'Please provide valid username, name, and 4–8 digit PIN.';
+      setPinModalError(msg);
+      setNotification({ type: 'error', message: msg });
       return;
     }
 
@@ -444,10 +548,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setNewName('');
       setNewNepaliName('');
       setNewPin('');
+      setPinModalError(null);
       setNotification({ type: 'success', message: `Staff account ${newStaff.name} created.` });
       setTimeout(() => setNotification(null), 3000);
     } catch {
-      setNotification({ type: 'error', message: 'Failed to create staff account.' });
+      const msg = 'Failed to create staff account.';
+      setPinModalError(msg);
+      setNotification({ type: 'error', message: msg });
     }
   };
 
@@ -455,7 +562,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     e.preventDefault();
     if (!canManageStaff || !onUpdateStaffUsers || !resetPinTarget) return;
     if (!canActorManageStaffMember(userRole, resetPinTarget.role)) {
-      setNotification({ type: 'error', message: `Permission denied: ${userRole || 'Staff'} cannot reset PIN for ${resetPinTarget.role}.` });
+      const msg = `Permission denied: ${userRole || 'Staff'} cannot reset PIN for ${resetPinTarget.role}.`;
+      setPinModalError(msg);
+      setNotification({ type: 'error', message: msg });
       return;
     }
     const pinCheck = await validateProductionPin(newSecretPin.trim(), appState.staffUsers, { excludeStaffId: resetPinTarget.id });
@@ -476,12 +585,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         return s;
       });
       onUpdateStaffUsers(updated);
+      const targetName = resetPinTarget.name;
       setResetPinTarget(null);
       setNewSecretPin('');
-      setNotification({ type: 'success', message: `PIN updated successfully for ${resetPinTarget.name}.` });
+      setPinModalError(null);
+      setNotification({
+        type: 'success',
+        message: lang === 'ne'
+          ? `${targetName} को नयाँ PIN सफलतापूर्वक सेभ भयो।`
+          : `New PIN saved for ${targetName}.`
+      });
       setTimeout(() => setNotification(null), 3000);
     } catch {
-      setNotification({ type: 'error', message: 'Error updating staff PIN.' });
+      const msg = 'Error updating staff PIN.';
+      setPinModalError(msg);
+      setNotification({ type: 'error', message: msg });
     }
   };
 
@@ -489,13 +607,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     e.preventDefault();
     if (!editingStaff || !onUpdateStaffUsers) return;
     const original = appState.staffUsers.find(s => s.id === editingStaff.id);
-    if (!canActorAssignRole(userRole, editingStaff.role, original?.role)) {
-      setNotification({
-        type: 'error',
-        message: `Permission denied: ${userRole || 'Staff'} cannot assign role ${editingStaff.role}.`
-      });
+    if (!original) {
+      setEditStaffError('Staff account not found.');
       return;
     }
+    const roleChanged = editingStaff.role !== original.role;
+    const allowed = roleChanged
+      ? canActorAssignRole(userRole, editingStaff.role, original.role)
+      : canActorManageStaffMember(userRole, original.role);
+
+    if (!allowed) {
+      const msg = roleChanged
+        ? `Permission denied: ${userRole || 'Staff'} cannot assign role ${editingStaff.role}.`
+        : `Permission denied: ${userRole || 'Staff'} cannot edit ${original.role}.`;
+      setEditStaffError(msg);
+      setNotification({ type: 'error', message: msg });
+      return;
+    }
+    setEditStaffError(null);
     const updated = appState.staffUsers.map(s => s.id === editingStaff.id ? editingStaff : s);
     onUpdateStaffUsers(updated);
     setNotification({
@@ -702,7 +831,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         />
                         <button
                           type="button"
-                          disabled={!canModifyConfig || isUploadingLogo}
+                          disabled={!canManageProfile || isUploadingLogo}
                           onClick={() => logoFileInputRef.current?.click()}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors"
                         >
@@ -719,7 +848,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         {formData.logoUrl && (
                           <button
                             type="button"
-                            disabled={!canModifyConfig}
+                            disabled={!canManageProfile}
                             onClick={() => {
                               setLogoPreviewFailed(false);
                               setLogoUploadError(null);
@@ -741,7 +870,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         ) : (
                           <input
                             type="url"
-                            disabled={!canModifyConfig}
+                            disabled={!canManageProfile}
                             value={formData.logoUrl || ''}
                             onChange={(e) => {
                               setLogoPreviewFailed(false);
@@ -906,7 +1035,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {canManageStaff && (
                     <button
                       type="button"
-                      onClick={() => setShowAddStaffModal(true)}
+                      onClick={() => {
+                        setPinModalError(null);
+                        setShowAddStaffModal(true);
+                      }}
                       className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
                     >
                       <Plus className="h-4 w-4 text-emerald-400" />
@@ -928,11 +1060,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {appState.staffUsers.map((staff) => (
+                    {appState.staffUsers.map((staff) => {
+                      const isSelfSession = staff.id === currentSession?.staffId;
+                      return (
                       <tr key={staff.id} className="hover:bg-slate-50/60">
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-slate-900">{staff.name}</span>
+                            {isSelfSession && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                {lang === 'ne' ? 'तपाईं (चालू)' : 'You'}
+                              </span>
+                            )}
                             {staff.mustChangePin && (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
                                 Default PIN · Rotate
@@ -957,12 +1096,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <td className="py-3 px-4 font-mono text-[11px] text-slate-500">
                           {staff.pinHash.substring(0, 10)}... (SHA-256)
                         </td>
-                        <td className="py-3 px-4 text-right space-x-2">
+                        <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                           {canManageStaff && canActorManageStaffMember(userRole, staff.role) ? (
                             <>
                               <button
                                 type="button"
-                                onClick={() => setEditingStaff(staff)}
+                                onClick={() => {
+                                  setEditStaffError(null);
+                                  setEditingStaff(staff);
+                                }}
                                 className="px-2.5 py-1 text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 border border-indigo-200 rounded-lg font-semibold text-[11px]"
                               >
                                 {lang === 'ne' ? 'सच्याउने' : 'Edit'}
@@ -970,22 +1112,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  setPinModalError(null);
                                   setResetPinTarget(staff);
                                   setNewSecretPin('');
                                 }}
                                 className="px-2.5 py-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100 border border-slate-300 rounded-lg font-semibold text-[11px]"
                               >
-                                Reset PIN
+                                {lang === 'ne' ? 'PIN बदल्ने' : 'Change PIN'}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleToggleStaffActive(staff.id)}
                                 className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] ${
-                                  staff.isActive ? 'text-rose-700 hover:bg-rose-50 border border-rose-200' : 'text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+                                  staff.isActive ? 'text-amber-700 hover:bg-amber-50 border border-amber-200' : 'text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
                                 }`}
                               >
                                 {staff.isActive ? 'Disable' : 'Enable'}
                               </button>
+                              {!isSelfSession && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteStaff(staff)}
+                                  title={lang === 'ne' ? 'हटाउनुहोस्' : 'Remove staff'}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-rose-700 hover:text-rose-900 hover:bg-rose-50 border border-rose-200 rounded-lg font-semibold text-[11px]"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>{lang === 'ne' ? 'हटाउने' : 'Remove'}</span>
+                                </button>
+                              )}
                             </>
                           ) : (
                             <span className="text-[10px] font-semibold text-slate-400">
@@ -994,7 +1148,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1111,13 +1266,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <h3 className="font-bold text-slate-900 text-sm">Configured Payment Methods</h3>
                   <p className="text-xs text-slate-500">Cash, card, direct bank transfer, Fonepay QR, eSewa, and Khalti digital channels</p>
                 </div>
-                {onNavigateToBusinessAdmin && (
+                {onNavigateToBusinessAdmin && canManagePaymentMethods && (
                   <button
                     type="button"
                     onClick={() => onNavigateToBusinessAdmin('payments')}
                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
                   >
-                    <span>Manage Channels in Owner Suite</span>
+                    <span>{lang === 'ne' ? 'भुक्तानी र QR व्यवस्थापन खोल्नुहोस्' : 'Manage Channels & QR'}</span>
                     <ArrowRight className="h-4 w-4 text-emerald-400" />
                   </button>
                 )}
@@ -1128,11 +1283,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div key={pm.id} className="p-4 border border-slate-200 rounded-xl space-y-2.5 bg-slate-50/50">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-bold text-slate-900 truncate">{pm.name}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
-                        pm.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                      }`}>
-                        {pm.enabled ? 'Enabled' : 'Disabled'}
-                      </span>
+                      {canManagePaymentMethods ? (
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePaymentMethod(pm.id)}
+                          className={`text-[10px] font-bold px-2.5 py-0.5 rounded shrink-0 border transition-colors ${
+                            pm.enabled
+                              ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border-emerald-300'
+                              : 'bg-slate-200 hover:bg-slate-300 text-slate-700 border-slate-300'
+                          }`}
+                          title={lang === 'ne' ? 'चालु/बन्द गर्न क्लिक गर्नुहोस्' : 'Click to toggle Enabled/Disabled'}
+                        >
+                          {pm.enabled ? 'Enabled' : 'Disabled'}
+                        </button>
+                      ) : (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
+                          pm.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {pm.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2.5">
                       {pm.qrImageDataUrl && (
@@ -1212,7 +1382,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <input
                         type="checkbox"
                         checked={formData.receiptSettings?.showLogo ?? true}
-                        disabled={!canModifyConfig}
+                        disabled={!canManageProfile}
                         onChange={(e) => {
                           const nextReceiptSettings = {
                             ...DEFAULT_RECEIPT_SETTINGS,
@@ -1514,7 +1684,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           {/* SECTION 7: TAX & CHARGES */}
           {activeSubTab === 'taxes' && (
-            <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden animate-in fade-in duration-150">
+            <form onSubmit={handleTaxSubmit} className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden animate-in fade-in duration-150">
               <div className="p-6 space-y-5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
                   <div>
@@ -1548,10 +1718,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     {formData.enableVat && (
                       <div className="flex items-center gap-2 pt-1">
                         <span className="text-slate-600">VAT Rate (%):</span>
-                        <input
-                          type="number"
+                        <NumberInput
+                          min={0}
+                          max={100}
                           value={formData.vatRatePercent}
-                          onChange={(e) => setFormData({ ...formData, vatRatePercent: Number(e.target.value) })}
+                          onValueChange={(val) => setFormData({ ...formData, vatRatePercent: val })}
                           className="w-20 px-2.5 py-1 bg-white border border-slate-300 rounded font-mono font-bold"
                         />
                         <span className="text-slate-500 font-bold">%</span>
@@ -1573,10 +1744,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     {formData.enableServiceCharge && (
                       <div className="flex items-center gap-2 pt-1">
                         <span className="text-slate-600">Rate (%):</span>
-                        <input
-                          type="number"
+                        <NumberInput
+                          min={0}
+                          max={100}
                           value={formData.serviceChargePercent}
-                          onChange={(e) => setFormData({ ...formData, serviceChargePercent: Number(e.target.value) })}
+                          onValueChange={(val) => setFormData({ ...formData, serviceChargePercent: val })}
                           className="w-20 px-2.5 py-1 bg-white border border-slate-300 rounded font-mono font-bold"
                         />
                         <span className="text-slate-500 font-bold">%</span>
@@ -1947,7 +2119,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {/* Clear Demo Data Button */}
                 <button
                   type="button"
-                  disabled={!canModifyConfig}
+                  disabled={!canImportBackup}
                   onClick={() => setShowResetConfirm(true)}
                   className="flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-rose-50 disabled:opacity-40 text-rose-700 border border-slate-300 rounded-xl text-xs font-semibold transition-all shadow-2xs hover:border-rose-300"
                 >
@@ -1966,11 +2138,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <h4 className="font-bold text-sm">Add New Staff Account ({activeBusiness?.businessName})</h4>
-              <button onClick={() => setShowAddStaffModal(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddStaffModal(false);
+                  setPinModalError(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <form onSubmit={handleCreateStaffSubmit} className="p-5 space-y-3.5 text-xs">
+              {pinModalError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 font-semibold">
+                  {pinModalError}
+                </div>
+              )}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Username (login id) *</label>
                 <input
@@ -2019,14 +2203,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Security PIN (4-6 digits) *</label>
+                  <label className="block font-bold text-slate-700 mb-1">Security PIN (4–8 digits) *</label>
                   <input
                     type="password"
-                    maxLength={6}
+                    inputMode="numeric"
+                    maxLength={8}
                     required
                     placeholder="••••"
                     value={newPin}
-                    onChange={(e) => setNewPin(e.target.value)}
+                    onChange={(e) => {
+                      setNewPin(e.target.value.replace(/\D/g, ''));
+                      setPinModalError(null);
+                    }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono text-center tracking-widest text-sm"
                   />
                 </div>
@@ -2034,7 +2222,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddStaffModal(false)}
+                  onClick={() => {
+                    setShowAddStaffModal(false);
+                    setPinModalError(null);
+                  }}
                   className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
                   Cancel
@@ -2056,14 +2247,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200">
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
-              <h4 className="font-bold text-sm">Reset Staff PIN</h4>
-              <button onClick={() => setResetPinTarget(null)} className="text-slate-400 hover:text-white">
+              <h4 className="font-bold text-sm">
+                {lang === 'ne' ? 'PIN परिवर्तन गरी सेभ गर्नुहोस्' : 'Change & Save New PIN'}
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetPinTarget(null);
+                  setPinModalError(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <form onSubmit={handleResetPinSubmit} className="p-5 space-y-3.5 text-xs">
               <p className="text-slate-600">
-                Resetting security PIN for <strong className="text-slate-900">{resetPinTarget.name}</strong> ({resetPinTarget.role}).
+                {lang === 'ne'
+                  ? <>प्रयोगकर्ता <strong className="text-slate-900">{resetPinTarget.name}</strong> ({resetPinTarget.role}) को नयाँ PIN सेट गर्नुहोस्।</>
+                  : <>Setting new security PIN for <strong className="text-slate-900">{resetPinTarget.name}</strong> ({resetPinTarget.role}).</>}
               </p>
               {pinModalError && (
                 <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 font-semibold">
@@ -2074,6 +2276,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <label className="block font-bold text-slate-700 mb-1">New Strong PIN (4–8 digits, no defaults) *</label>
                 <input
                   type="password"
+                  inputMode="numeric"
                   required
                   maxLength={8}
                   placeholder="••••••"
@@ -2094,14 +2297,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   }}
                   className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
-                  Cancel
+                  {lang === 'ne' ? 'रद्द' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={newSecretPin.length < 4}
                   className="px-5 py-2 font-bold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-40 rounded-xl shadow-2xs"
                 >
-                  Save New PIN
+                  {lang === 'ne' ? 'नयाँ PIN सेभ गर्नुहोस्' : 'Save New PIN'}
                 </button>
               </div>
             </form>
@@ -2117,14 +2320,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="flex items-center gap-2">
                 <Edit2 className="h-4 w-4 text-emerald-400" />
                 <h4 className="font-bold text-sm">
-                  {lang === 'ne' ? 'स्टाफ/वेटरको विवरण सम्पादन' : 'Edit Staff / Waiter Profile'}
+                  {lang === 'ne' ? 'स्टाफ/प्रयोगकर्ता विवरण सम्पादन' : 'Edit Staff / User Profile'}
                 </h4>
               </div>
-              <button onClick={() => setEditingStaff(null)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingStaff(null);
+                  setEditStaffError(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
             <form onSubmit={handleEditStaffSubmit} className="p-5 space-y-3.5 text-xs">
+              {editStaffError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 font-semibold">
+                  {editStaffError}
+                </div>
+              )}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
                   {lang === 'ne' ? 'युजरनेम (परिवर्तन गर्न नमिल्ने):' : 'Username (Immutable):'}
@@ -2172,9 +2387,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onChange={(e) => setEditingStaff({ ...editingStaff, role: e.target.value as StaffRole })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl font-semibold text-slate-800 bg-white"
                 >
-                  {assignableRoleOptions.map(r => (
-                    <option key={r.role} value={r.role}>{r.label}</option>
-                  ))}
+                  {defaultRoles
+                    .filter(r => r.role === editingStaff.role || assignableRoles.includes(r.role))
+                    .map(r => (
+                      <option key={r.role} value={r.role}>{r.label}</option>
+                    ))}
                 </select>
               </div>
 
@@ -2196,7 +2413,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </label>
                   <input
                     type="email"
-                    value={editingStaff.email || ''}
+                    value={editingStaff.role === 'SUPER_ADMIN' ? '' : (editingStaff.email || '')}
                     onChange={(e) => setEditingStaff({ ...editingStaff, email: e.target.value })}
                     className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs"
                   />
@@ -2206,7 +2423,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditingStaff(null)}
+                  onClick={() => {
+                    setEditingStaff(null);
+                    setEditStaffError(null);
+                  }}
                   className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
                 >
                   {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
@@ -2219,6 +2439,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM STAFF REMOVAL */}
+      {confirmDeleteStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200 p-5 space-y-4 text-xs">
+            <div className="flex items-center gap-2.5 text-rose-700 font-bold text-sm">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              <span>{lang === 'ne' ? 'कर्मचारी खाता हटाउने पुष्टि' : 'Confirm Staff Removal'}</span>
+            </div>
+            <p className="text-slate-600 leading-relaxed">
+              {lang === 'ne'
+                ? <>के तपाईं <strong className="text-slate-900">{confirmDeleteStaff.name}</strong> (@{confirmDeleteStaff.username} · {confirmDeleteStaff.role}) को खाता स्थायी रूपमा हटाउन चाहनुहुन्छ? सबै डिभाइसबाट यो खाता हट्नेछ।</>
+                : <>Are you sure you want to remove <strong className="text-slate-900">{confirmDeleteStaff.name}</strong> (@{confirmDeleteStaff.username} · {confirmDeleteStaff.role})? This removes the account across all synced devices.</>}
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteStaff(null)}
+                className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteStaff}
+                className="px-4 py-2 font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-xl"
+              >
+                {lang === 'ne' ? 'हटाउनुहोस्' : 'Remove Account'}
+              </button>
+            </div>
           </div>
         </div>
       )}

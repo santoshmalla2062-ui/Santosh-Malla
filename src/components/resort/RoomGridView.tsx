@@ -23,6 +23,7 @@ import {
   Edit3,
   BedDouble
 } from 'lucide-react';
+import { NumberInput } from '../common/NumberInput';
 import {
   BusinessSettings,
   GuestFolioItem,
@@ -1085,12 +1086,10 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Nightly ({settings.currencySymbol}):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
+                  <NumberInput
+                    min={0}
                     value={pricePerNight}
-                    onChange={(e) => setPricePerNight(Number(e.target.value))}
+                    onValueChange={(val) => setPricePerNight(val)}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                     required
                   />
@@ -1098,12 +1097,10 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Hourly ({settings.currencySymbol}):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
+                  <NumberInput
+                    min={0}
                     value={hourlyRate}
-                    onChange={(e) => setHourlyRate(Number(e.target.value))}
+                    onValueChange={(val) => setHourlyRate(val)}
                     placeholder="0"
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                   />
@@ -1111,23 +1108,21 @@ export const RoomGridView: React.FC<RoomGridViewProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Extra Guest:</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
+                  <NumberInput
+                    min={0}
                     value={extraGuestPrice}
-                    onChange={(e) => setExtraGuestPrice(Number(e.target.value))}
+                    onValueChange={(val) => setExtraGuestPrice(val)}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                   />
                 </div>
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Max Guests:</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
                     value={capacity}
-                    onChange={(e) => setCapacity(Number(e.target.value))}
+                    onValueChange={(val) => setCapacity(val)}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num"
                     required
                   />

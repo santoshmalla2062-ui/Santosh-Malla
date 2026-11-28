@@ -721,6 +721,191 @@
         "severity",
         "createdAt"
       ]
+    },
+    "WorkspaceAccessDirectory": {
+      "title": "Cross-Workspace User Access Directory",
+      "description": "Email-scoped discovery index allowing installed mobile apps and fresh terminals to locate their authorized businessId without scanning all tenants.",
+      "type": "object",
+      "properties": {
+        "accessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "inviteId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "staffName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "businessName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN", "MANAGER", "CASHIER", "WAITER", "KITCHEN", "RECEPTIONIST", "HOUSEKEEPING", "ACCOUNTANT", "INVENTORY_STAFF", "STAFF"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACTIVE", "REVOKED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["accessId", "businessId", "inviteId", "ownerUid", "email", "role", "status", "createdAt", "updatedAt"]
+    },
+    "StaffAccountRecord": {
+      "title": "Sharded Staff & User PIN Account",
+      "description": "Synchronized staff/user terminal profile and salted SHA-256 PIN hash stored in a dedicated subcollection accessible to Owner, Admin, and Manager across devices.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "nepaliName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["SUPER_ADMIN", "OWNER", "ADMIN", "MANAGER", "CASHIER", "WAITER", "KITCHEN", "RECEPTIONIST", "HOUSEKEEPING", "ACCOUNTANT", "INVENTORY_STAFF", "STAFF"]
+        },
+        "pinHash": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "salt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "mustChangePin": {
+          "type": "boolean"
+        },
+        "lastPinChangedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "linkedFirebaseUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "lastLogin": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "businessId", "ownerUid", "updatedByUid", "username", "name", "role", "pinHash", "salt", "isActive", "createdAt", "updatedAt"]
+    },
+    "OwnerWorkspaceClaim": {
+      "title": "Single Business Owner Workspace Lock",
+      "description": "One-to-one lock document keyed by Firebase Auth UID guaranteeing non-Master users can create/own at most one business workspace in Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "businessId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerUid", "businessId", "ownerEmail", "createdAt"]
     }
   },
   "firestore": {
@@ -728,17 +913,29 @@
       "schema": { "$ref": "#/entities/AdminRegistry" },
       "description": "Bootstrapped Master Owner document keyed by Firebase Auth UID."
     },
+    "/ownerWorkspaces/{ownerUid}": {
+      "schema": { "$ref": "#/entities/OwnerWorkspaceClaim" },
+      "description": "One-to-one owner lock preventing non-Master accounts from creating more than one business."
+    },
+    "/workspaceAccess/{accessId}": {
+      "schema": { "$ref": "#/entities/WorkspaceAccessDirectory" },
+      "description": "Email-scoped index mapping verified staff emails to their authorized businessId across devices."
+    },
     "/businesses/{businessId}": {
       "schema": { "$ref": "#/entities/BusinessWorkspace" },
       "description": "Business configuration and owner-lock flags."
     },
     "/businesses/{businessId}/invites/{inviteId}": {
       "schema": { "$ref": "#/entities/StaffInvite" },
-      "description": "Owner-issued Gmail invitations mapping specific employees to strict roles."
+      "description": "Owner/Admin/Manager-issued Gmail invitations mapping specific employees to roles."
     },
     "/businesses/{businessId}/members/{memberUid}": {
       "schema": { "$ref": "#/entities/BusinessMember" },
       "description": "Verified members allowed on mobile/tablet/desktop terminals."
+    },
+    "/businesses/{businessId}/staffAccounts/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffAccountRecord" },
+      "description": "Sharded staff/user terminal profiles and salted PIN hashes synced in real time for Owner, Admin, and Manager across devices."
     },
     "/businesses/{businessId}/syncChannels/{channelId}": {
       "schema": { "$ref": "#/entities/SyncChannelState" },

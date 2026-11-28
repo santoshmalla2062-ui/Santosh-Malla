@@ -14,6 +14,7 @@ import {
   Building,
   DoorOpen
 } from 'lucide-react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   BusinessSettings, 
   GuestProfile, 
@@ -352,12 +353,13 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Adults:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="12"
+                  <NumberInput
+                    min={1}
+                    max={12}
+                    integer
+                    emptyValue={1}
                     value={adults}
-                    onChange={(e) => setAdults(Math.max(1, Number(e.target.value)))}
+                    onValueChange={(val) => setAdults(val)}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
                     required
                   />
@@ -365,12 +367,12 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Children:</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="8"
+                  <NumberInput
+                    min={0}
+                    max={8}
+                    integer
                     value={children}
-                    onChange={(e) => setChildren(Math.max(0, Number(e.target.value)))}
+                    onValueChange={(val) => setChildren(val)}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold font-mono-num"
                   />
                 </div>
@@ -574,12 +576,10 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Nightly Room Rate ({settings.currencySymbol}):</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
+                <NumberInput
+                  min={0}
                   value={activeRate}
-                  onChange={(e) => setCustomRoomRate(Number(e.target.value))}
+                  onValueChange={(val) => setCustomRoomRate(val)}
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                   required
                 />
@@ -587,24 +587,20 @@ export const NewReservationModal: React.FC<NewReservationModalProps> = ({
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Discount Amount ({settings.currencySymbol}):</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
+                <NumberInput
+                  min={0}
                   value={discountAmount}
-                  onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                  onValueChange={(val) => setDiscountAmount(val)}
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-rose-700"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Advance Deposit ({settings.currencySymbol}):</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="500"
+                <NumberInput
+                  min={0}
                   value={depositAmount}
-                  onChange={(e) => setDepositAmount(Number(e.target.value))}
+                  onValueChange={(val) => setDepositAmount(val)}
                   className="w-full px-2.5 py-1.5 bg-white border border-emerald-400 rounded-lg font-mono-num font-bold text-emerald-950"
                 />
               </div>

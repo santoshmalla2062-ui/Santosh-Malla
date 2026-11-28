@@ -1,5 +1,7 @@
 import {
   collection,
+  collectionGroup,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -29,14 +31,86 @@ import {
   CreditNoteRecord,
   JournalEntry,
   Order,
-  StaffRole
+  StaffRole,
+  StaffUser
 } from '../types';
 import { canActorAssignRole, canActorManageStaffMember } from './security';
 
 export const MAX_SYNC_CHANNEL_BYTES = 550_000;
 
-export const MASTER_OWNER_EMAIL = 'samjhamnamalla22444@gmail.com';
-export const APP_CREATOR_EMAIL = MASTER_OWNER_EMAIL;
+const MASTER_OWNER_HASH_SALT = 'hb_pos_master_owner_v1_2026:';
+const MASTER_OWNER_EMAIL_HASH = 'ecef9710d3770c7a7068b66149934b96bc46543675fb99da5907544afc550d38';
+
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+
+function sha256Utf8Hex(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  const bitLen = bytes.length * 8;
+  const paddedLen = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLen - 8, Math.floor(bitLen / 0x100000000), false);
+  view.setUint32(paddedLen - 4, bitLen >>> 0, false);
+
+  const h = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+  const w = new Uint32Array(64);
+  const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
+
+  for (let offset = 0; offset < paddedLen; offset += 64) {
+    for (let i = 0; i < 16; i++) {
+      w[i] = view.getUint32(offset + i * 4, false);
+    }
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+
+    let [a, b, c, d, e, f, g, hh] = h;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (hh + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+
+      hh = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    h[0] = (h[0] + a) >>> 0;
+    h[1] = (h[1] + b) >>> 0;
+    h[2] = (h[2] + c) >>> 0;
+    h[3] = (h[3] + d) >>> 0;
+    h[4] = (h[4] + e) >>> 0;
+    h[5] = (h[5] + f) >>> 0;
+    h[6] = (h[6] + g) >>> 0;
+    h[7] = (h[7] + hh) >>> 0;
+  }
+
+  return h.map((v) => v.toString(16).padStart(8, '0')).join('');
+}
 
 export type SyncChannelId =
   | 'orders_live'
@@ -95,6 +169,24 @@ export interface CloudMemberRecord {
   inviteId?: string;
 }
 
+export const DEFAULT_WORKSPACE_CANDIDATES = [
+  'biz-himalayan-breeze',
+  'biz-annapurna-cafe',
+  'biz-pokhara-lodge'
+] as const;
+
+export interface WorkspaceAccessDirectoryEntry {
+  accessId: string;
+  businessId: string;
+  inviteId: string;
+  ownerUid: string;
+  email: string;
+  staffName?: string;
+  businessName?: string;
+  role: StaffRole;
+  status: 'PENDING' | 'ACTIVE' | 'REVOKED';
+}
+
 export type CloudAccessResolution =
   | {
       status: 'MASTER_OWNER';
@@ -111,12 +203,15 @@ export type CloudAccessResolution =
       email: string;
       name: string;
       isBusinessOwner: boolean;
+      businessId?: string;
+      businessMeta?: CloudWorkspaceMeta;
     }
   | {
       status: 'REVOKED';
       role: StaffRole;
       email: string;
       reason: string;
+      businessId?: string;
     }
   | {
       status: 'UNAUTHORIZED';
@@ -133,7 +228,14 @@ export function isValidFirestoreId(id: string): boolean {
 }
 
 export function isMasterOwnerEmail(email?: string | null): boolean {
-  return normalizeEmail(email) === MASTER_OWNER_EMAIL;
+  const clean = normalizeEmail(email);
+  if (!clean) return false;
+  return sha256Utf8Hex(MASTER_OWNER_HASH_SALT + clean) === MASTER_OWNER_EMAIL_HASH;
+}
+
+export function redactProtectedEmail(email?: string | null, fallback = ''): string {
+  if (!email) return fallback;
+  return isMasterOwnerEmail(email) ? fallback : email;
 }
 
 export function isMasterOwnerUser(
@@ -475,7 +577,9 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
         cashRegisters: (state.cashRegisters || []).slice(0, 80),
         accounts: (state.accounts || []).slice(0, 100),
         journalEntries: (state.journalEntries || []).slice(0, 25),
-        creditNotes: (state.creditNotes || []).slice(0, 25)
+        creditNotes: (state.creditNotes || []).slice(0, 25),
+        paymentMethodsConfig: state.settings?.paymentMethodsConfig,
+        panVatNumber: state.settings?.panVatNumber
       });
       return enforceChannelPayloadByteBudget(payload, [
         'journalEntries',
@@ -516,9 +620,29 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
     case 'admin_controls': {
       // Full AuditLogs are sharded into /businesses/{businessId}/auditLogs/{logId};
       // keep only recent 30 audit tail + enforce strict byte budget.
+      const sanitizedSettings = state.settings
+        ? {
+            ...state.settings,
+            securitySettings: state.settings.securitySettings
+              ? (() => {
+                  const { masterOwnerEmail: _dropped, ...restSec } = state.settings.securitySettings;
+                  return restSec;
+                })()
+              : undefined
+          }
+        : state.settings;
+      const sanitizedStaff = (state.staffUsers || []).slice(0, 150).map((s) =>
+        s.role === 'SUPER_ADMIN' || isMasterOwnerEmail(s.email) || isMasterOwnerEmail(s.username)
+          ? {
+              ...s,
+              username: isMasterOwnerEmail(s.username) ? 'superadmin' : s.username,
+              email: undefined
+            }
+          : s
+      );
       const payload = sanitizeForFirestore({
-        settings: state.settings,
-        staffUsers: (state.staffUsers || []).slice(0, 150),
+        settings: sanitizedSettings,
+        staffUsers: sanitizedStaff,
         auditLogs: (state.auditLogs || []).slice(0, 30),
         staffInvitations: (state.staffInvitations || []).slice(0, 100)
       });
@@ -601,7 +725,17 @@ export function mergeChannelPayloadIntoAppState(
           : prev.journalEntries,
         creditNotes: Array.isArray(data.creditNotes)
           ? mergeArrayById(prev.creditNotes || [], data.creditNotes, (c) => c.createdAt || '')
-          : prev.creditNotes
+          : prev.creditNotes,
+        settings:
+          Array.isArray(data.paymentMethodsConfig) || typeof data.panVatNumber === 'string'
+            ? {
+                ...prev.settings,
+                ...(Array.isArray(data.paymentMethodsConfig) && data.paymentMethodsConfig.length > 0
+                  ? { paymentMethodsConfig: data.paymentMethodsConfig }
+                  : {}),
+                ...(typeof data.panVatNumber === 'string' ? { panVatNumber: data.panVatNumber } : {})
+              }
+            : prev.settings
       };
     case 'resort_ops':
       return {
@@ -617,16 +751,34 @@ export function mergeChannelPayloadIntoAppState(
         hotelPayments: Array.isArray(data.hotelPayments) ? data.hotelPayments : prev.hotelPayments,
         nightAudits: Array.isArray(data.nightAudits) ? data.nightAudits : prev.nightAudits
       };
-    case 'admin_controls':
+    case 'admin_controls': {
+      const mergedSettings =
+        data.settings && typeof data.settings === 'object' ? { ...prev.settings, ...data.settings } : prev.settings;
+      if (mergedSettings?.securitySettings && 'masterOwnerEmail' in mergedSettings.securitySettings) {
+        const { masterOwnerEmail: _dropped, ...restSec } = mergedSettings.securitySettings;
+        mergedSettings.securitySettings = restSec;
+      }
+      const nextStaff = Array.isArray(data.staffUsers)
+        ? data.staffUsers.map((s: StaffUser) =>
+            s?.role === 'SUPER_ADMIN' || isMasterOwnerEmail(s?.email) || isMasterOwnerEmail(s?.username)
+              ? {
+                  ...s,
+                  username: isMasterOwnerEmail(s.username) ? 'superadmin' : s.username,
+                  email: undefined
+                }
+              : s
+          )
+        : prev.staffUsers;
       return {
         ...prev,
-        settings: data.settings && typeof data.settings === 'object' ? { ...prev.settings, ...data.settings } : prev.settings,
-        staffUsers: Array.isArray(data.staffUsers) ? data.staffUsers : prev.staffUsers,
+        settings: mergedSettings,
+        staffUsers: nextStaff,
         auditLogs: Array.isArray(data.auditLogs)
           ? mergeArrayById(prev.auditLogs || [], data.auditLogs, (a) => a.timestamp || '')
           : prev.auditLogs,
         staffInvitations: Array.isArray(data.staffInvitations) ? data.staffInvitations : prev.staffInvitations
       };
+    }
   }
 }
 
@@ -786,7 +938,7 @@ export async function bootstrapMasterOwnerWorkspace(
         tagline: raw.tagline,
         businessType: raw.businessType,
         ownerUid: raw.ownerUid,
-        ownerEmail: raw.ownerEmail,
+        ownerEmail: redactProtectedEmail(raw.ownerEmail, ''),
         status: raw.status,
         enabledModules: raw.enabledModules || [],
         currencySymbol: raw.currencySymbol || 'Rs.',
@@ -827,7 +979,7 @@ export async function bootstrapMasterOwnerWorkspace(
         tagline: newMeta.tagline,
         businessType: newMeta.businessType,
         ownerUid: user.uid,
-        ownerEmail: normalizeEmail(user.email),
+        ownerEmail: redactProtectedEmail(normalizeEmail(user.email), ''),
         status: newMeta.status,
         enabledModules: newMeta.enabledModules,
         currencySymbol: newMeta.currencySymbol,
@@ -881,35 +1033,254 @@ export async function bootstrapMasterOwnerWorkspace(
 }
 
 /**
- * Resolves Firebase Cloud access for any signed-in Google user (Master Owner, Business Owner,
- * active member, or claiming an owner-issued PENDING invite atomically).
+ * Registers a newly created business workspace in Firestore.
+ * For non-Master accounts, atomically writes /ownerWorkspaces/{uid} in the same WriteBatch
+ * so Firestore security rules strictly enforce at most 1 business per account.
  */
-export async function resolveCloudMemberAccess(
+export async function registerBusinessInCloud(
   user: User,
+  business: BusinessTenant,
+  localState: AppState
+): Promise<CloudWorkspaceMeta> {
+  if (!user.emailVerified || !user.email) {
+    throw new Error('Email must be verified before registering a cloud business.');
+  }
+
+  const isMaster = isMasterOwnerUser(user);
+  const bizPath = `businesses/${business.businessId}`;
+  const bizRef = doc(db, 'businesses', business.businessId);
+  const ownerLockRef = doc(db, 'ownerWorkspaces', user.uid);
+  const cleanEmail = normalizeEmail(user.email);
+
+  try {
+    if (!isMaster) {
+      const existingClaim = await getDoc(ownerLockRef);
+      if (existingClaim.exists()) {
+        throw new Error(
+          'Single-Business Policy: This cloud account already owns a business workspace and cannot create another.'
+        );
+      }
+    }
+
+    const ownerControlLocked = localState.settings?.securitySettings?.ownerControlLocked !== false;
+    const newMeta: Record<string, any> = sanitizeForFirestore({
+      businessId: business.businessId,
+      businessName: truncateStr(business.businessName || localState.settings.businessName, 160) || 'Himalayan Breeze POS',
+      nepaliBusinessName: truncateStr(business.nepaliBusinessName || localState.settings.nepaliBusinessName, 160),
+      tagline: truncateStr(business.tagline || localState.settings.tagline, 240),
+      businessType: business.businessType || 'CAFE_RESTAURANT_RESORT',
+      ownerUid: user.uid,
+      ownerEmail: cleanEmail,
+      status: business.status || 'ACTIVE',
+      enabledModules: (business.enabledModules || []).slice(0, 12),
+      currencySymbol: truncateStr(localState.settings.currencySymbol || business.currencySymbol || 'Rs.', 10) || 'Rs.',
+      enableVat: Boolean(localState.settings.enableVat),
+      vatRatePercent: Math.min(50, Math.max(0, Number(localState.settings.vatRatePercent ?? 13))),
+      enableServiceCharge: Boolean(localState.settings.enableServiceCharge),
+      serviceChargePercent: Math.min(50, Math.max(0, Number(localState.settings.serviceChargePercent ?? 10))),
+      fonepayMerchantName: truncateStr(localState.settings.fonepayMerchantName, 120),
+      ownerControlLocked,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    if (isMaster) {
+      await setDoc(bizRef, newMeta);
+    } else {
+      const batch = writeBatch(db);
+      batch.set(bizRef, newMeta);
+      batch.set(
+        ownerLockRef,
+        sanitizeForFirestore({
+          ownerUid: user.uid,
+          businessId: business.businessId,
+          ownerEmail: cleanEmail,
+          createdAt: serverTimestamp()
+        })
+      );
+      await batch.commit();
+    }
+
+    for (const channelId of ALL_SYNC_CHANNELS) {
+      const channelRef = doc(db, 'businesses', business.businessId, 'syncChannels', channelId);
+      const payload = extractChannelPayload(channelId, localState);
+      await setDoc(channelRef, {
+        channelId,
+        businessId: business.businessId,
+        ownerUid: user.uid,
+        updatedByUid: user.uid,
+        revision: 1,
+        data: payload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    return {
+      businessId: newMeta.businessId,
+      businessName: newMeta.businessName,
+      nepaliBusinessName: newMeta.nepaliBusinessName,
+      tagline: newMeta.tagline,
+      businessType: newMeta.businessType,
+      ownerUid: user.uid,
+      ownerEmail: redactProtectedEmail(cleanEmail, ''),
+      status: newMeta.status,
+      enabledModules: newMeta.enabledModules,
+      currencySymbol: newMeta.currencySymbol,
+      enableVat: newMeta.enableVat,
+      vatRatePercent: newMeta.vatRatePercent,
+      enableServiceCharge: newMeta.enableServiceCharge,
+      serviceChargePercent: newMeta.serviceChargePercent,
+      fonepayMerchantName: newMeta.fonepayMerchantName,
+      ownerControlLocked
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, bizPath);
+  }
+}
+
+export function getWorkspaceAccessDocId(businessId: string, inviteId: string): string {
+  const raw = `${businessId}__${inviteId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return raw.slice(0, 128);
+}
+
+export function buildCandidateBusinessDiscoveryOrder(params: {
+  preferredBusinessId: string;
+  directoryBusinessIds?: string[];
+  memberGroupBusinessIds?: string[];
+  inviteGroupBusinessIds?: string[];
+  localCandidateBusinessIds?: string[];
+}): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const push = (id?: string | null) => {
+    const clean = (id || '').trim();
+    if (!clean || !isValidFirestoreId(clean) || seen.has(clean)) return;
+    seen.add(clean);
+    ordered.push(clean);
+  };
+
+  push(params.preferredBusinessId);
+  (params.directoryBusinessIds || []).forEach(push);
+  (params.memberGroupBusinessIds || []).forEach(push);
+  (params.inviteGroupBusinessIds || []).forEach(push);
+  (params.localCandidateBusinessIds || []).forEach(push);
+  DEFAULT_WORKSPACE_CANDIDATES.forEach(push);
+  return ordered;
+}
+
+async function fetchCloudBusinessMeta(businessId: string): Promise<CloudWorkspaceMeta | undefined> {
+  if (!isValidFirestoreId(businessId)) return undefined;
+  try {
+    const snap = await getDoc(doc(db, 'businesses', businessId));
+    if (!snap.exists()) return undefined;
+    const raw = snap.data() as Record<string, any>;
+    return {
+      businessId: raw.businessId || snap.id,
+      businessName: raw.businessName || businessId,
+      nepaliBusinessName: raw.nepaliBusinessName,
+      tagline: raw.tagline,
+      businessType: raw.businessType,
+      ownerUid: raw.ownerUid || '',
+      ownerEmail: redactProtectedEmail(raw.ownerEmail, ''),
+      status: raw.status === 'SUSPENDED' || raw.status === 'INACTIVE' ? raw.status : 'ACTIVE',
+      enabledModules: Array.isArray(raw.enabledModules) ? raw.enabledModules : [],
+      currencySymbol: raw.currencySymbol || 'Rs.',
+      enableVat: raw.enableVat,
+      vatRatePercent: raw.vatRatePercent,
+      enableServiceCharge: raw.enableServiceCharge,
+      serviceChargePercent: raw.serviceChargePercent,
+      fonepayMerchantName: raw.fonepayMerchantName,
+      ownerControlLocked: raw.ownerControlLocked !== false
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function upsertWorkspaceAccessEntry(params: {
+  businessId: string;
+  inviteId: string;
+  ownerUid: string;
+  email: string;
+  staffName?: string;
+  businessName?: string;
+  role: StaffRole;
+  status: 'PENDING' | 'ACTIVE' | 'REVOKED';
+}): Promise<void> {
+  if (!isValidFirestoreId(params.businessId) || !isValidFirestoreId(params.inviteId)) return;
+  const accessId = getWorkspaceAccessDocId(params.businessId, params.inviteId);
+  const cleanEmail = normalizeEmail(params.email);
+  if (!cleanEmail || !isValidFirestoreId(accessId)) return;
+
+  const accessRef = doc(db, 'workspaceAccess', accessId);
+  const existing = await getDoc(accessRef);
+  if (!existing.exists()) {
+    await setDoc(
+      accessRef,
+      sanitizeForFirestore({
+        accessId,
+        businessId: params.businessId,
+        inviteId: params.inviteId,
+        ownerUid: params.ownerUid,
+        email: cleanEmail,
+        staffName: truncateStr(params.staffName, 120) || 'Staff Member',
+        businessName: truncateStr(params.businessName, 160) || params.businessId,
+        role: params.role,
+        status: params.status,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      })
+    );
+    return;
+  }
+
+  await updateDoc(
+    accessRef,
+    sanitizeForFirestore({
+      role: params.role,
+      status: params.status,
+      ...(params.staffName ? { staffName: truncateStr(params.staffName, 120) } : {}),
+      ...(params.businessName ? { businessName: truncateStr(params.businessName, 160) } : {}),
+      updatedAt: serverTimestamp()
+    })
+  );
+}
+
+/**
+ * Best-effort sync of existing business invites into /workspaceAccess so invites created before
+ * cross-device discovery remain automatically locatable on newly installed mobile apps.
+ */
+export async function syncExistingInvitesToWorkspaceDirectory(params: {
+  businessId: string;
+  businessName?: string;
+  invites: CloudStaffInvite[];
+}): Promise<void> {
+  if (!isValidFirestoreId(params.businessId) || !params.invites.length) return;
+  for (const invite of params.invites) {
+    if (invite.status === 'REVOKED') continue;
+    try {
+      await upsertWorkspaceAccessEntry({
+        businessId: params.businessId,
+        inviteId: invite.inviteId,
+        ownerUid: invite.ownerUid,
+        email: invite.email,
+        staffName: invite.staffName,
+        businessName: params.businessName,
+        role: invite.role,
+        status: invite.status
+      });
+    } catch {
+      // Best-effort index enrichment
+    }
+  }
+}
+
+async function resolveAccessInSingleBusiness(
+  user: User,
+  email: string,
   businessId: string
 ): Promise<CloudAccessResolution> {
-  const email = normalizeEmail(user.email);
-
-  if (!user.emailVerified || !email) {
-    return {
-      status: 'UNAUTHORIZED',
-      email,
-      reason: 'Google account email must be verified.'
-    };
-  }
-
-  if (isMasterOwnerUser(user)) {
-    return {
-      status: 'MASTER_OWNER',
-      role: 'SUPER_ADMIN',
-      ownerUid: user.uid,
-      email,
-      name: user.displayName || 'App Creator',
-      ownerControlLocked: true
-    };
-  }
-
-  // 1. Check existing membership doc first (get allowed strictly for request.auth.uid == memberUid)
   const memberPath = `businesses/${businessId}/members/${user.uid}`;
   const memberRef = doc(db, 'businesses', businessId, 'members', user.uid);
   try {
@@ -921,25 +1292,47 @@ export async function resolveCloudMemberAccess(
           status: 'REVOKED',
           role: data.role,
           email,
+          businessId,
           reason: `Device access for ${email} has been revoked by Owner.`
         };
       }
+      const businessMeta = await fetchCloudBusinessMeta(businessId);
       return {
         status: 'AUTHORIZED',
         role: data.role,
         ownerUid: data.ownerUid,
         email,
         name: data.name || user.displayName || email,
-        isBusinessOwner: data.ownerUid === user.uid
+        isBusinessOwner: data.ownerUid === user.uid,
+        businessId,
+        businessMeta
       };
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, memberPath);
+  } catch {
+    // Non-members or missing business workspaces can safely fall through to owner / invite discovery checks
   }
 
-  // 2. Check owner-issued PENDING invite matching this verified email
-  const invitesPath = `businesses/${businessId}/invites`;
+  // Direct Business Owner check (/businesses/{businessId}.ownerUid == user.uid)
+  try {
+    const directMeta = await fetchCloudBusinessMeta(businessId);
+    if (directMeta && directMeta.ownerUid === user.uid) {
+      return {
+        status: 'AUTHORIZED',
+        role: 'OWNER',
+        ownerUid: user.uid,
+        email,
+        name: user.displayName || email,
+        isBusinessOwner: true,
+        businessId,
+        businessMeta: directMeta
+      };
+    }
+  } catch {
+    // Ignore non-owner read denial
+  }
+
   let matchingInvite: CloudStaffInvite | null = null;
+  let activeInviteSameEmail: CloudStaffInvite | null = null;
   try {
     const invitesQuery = query(
       collection(db, 'businesses', businessId, 'invites'),
@@ -950,23 +1343,31 @@ export async function resolveCloudMemberAccess(
       const data = docSnap.data() as CloudStaffInvite;
       if (data.status === 'PENDING' && !matchingInvite) {
         matchingInvite = data;
+      } else if (data.status === 'ACTIVE' && !activeInviteSameEmail) {
+        activeInviteSameEmail = data;
       }
     });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, invitesPath);
+  } catch {
+    // Ignore permission errors when probing uninvited candidate workspaces during discovery
   }
 
   if (!matchingInvite) {
+    if (activeInviteSameEmail) {
+      return {
+        status: 'UNAUTHORIZED',
+        email,
+        reason: `This email (${email}) already activated its invite from another sign-in method (Google vs Email/Password). Sign in with that same method, or ask the Admin/Owner to send a fresh cloud invite.`
+      };
+    }
     return {
       status: 'UNAUTHORIZED',
       email,
-      reason: `This Gmail (${email}) is not authorized for this workspace. Ask your Owner or Admin to invite your Gmail or issue an Invitation Code.`
+      reason: `This email (${email}) is not authorized for this workspace. Ask your Owner, Admin, or Manager to invite your email.`
     };
   }
 
   const invite = matchingInvite as CloudStaffInvite;
 
-  // 3. Atomically activate invite + create member record (enforced by Firestore getAfter rule)
   try {
     const batch = writeBatch(db);
     const inviteRef = doc(db, 'businesses', businessId, 'invites', invite.inviteId);
@@ -991,14 +1392,156 @@ export async function resolveCloudMemberAccess(
     handleFirestoreError(error, OperationType.WRITE, memberPath);
   }
 
+  // Mirror ACTIVE status back into /workspaceAccess best-effort
+  try {
+    const accessRef = doc(db, 'workspaceAccess', getWorkspaceAccessDocId(businessId, invite.inviteId));
+    const accessSnap = await getDoc(accessRef);
+    if (accessSnap.exists() && accessSnap.data()?.status === 'PENDING') {
+      await updateDoc(accessRef, {
+        status: 'ACTIVE',
+        updatedAt: serverTimestamp()
+      });
+    }
+  } catch {
+    // Best-effort directory sync
+  }
+
+  const businessMeta = await fetchCloudBusinessMeta(businessId);
   return {
     status: 'AUTHORIZED',
     role: invite.role,
     ownerUid: invite.ownerUid,
     email,
     name: invite.staffName || user.displayName || email,
-    isBusinessOwner: false
+    isBusinessOwner: false,
+    businessId,
+    businessMeta
   };
+}
+
+/**
+ * Resolves Firebase Cloud access for any signed-in verified user (Master Owner, Business Owner,
+ * active member, or claiming an owner-issued PENDING invite atomically).
+ * Automatically discovers the user's invited/authorized business workspace on fresh mobile installs.
+ */
+export async function resolveCloudMemberAccess(
+  user: User,
+  businessId: string,
+  options?: {
+    candidateBusinessIds?: string[];
+    skipDiscovery?: boolean;
+  }
+): Promise<CloudAccessResolution> {
+  const email = normalizeEmail(user.email);
+
+  if (!user.emailVerified || !email) {
+    return {
+      status: 'UNAUTHORIZED',
+      email,
+      reason: 'Email address must be verified before unlocking cloud access.'
+    };
+  }
+
+  if (isMasterOwnerUser(user)) {
+    return {
+      status: 'MASTER_OWNER',
+      role: 'SUPER_ADMIN',
+      ownerUid: user.uid,
+      email,
+      name: user.displayName || 'App Creator',
+      ownerControlLocked: true
+    };
+  }
+
+  // 1. Check /ownerWorkspaces/{uid} claim first if non-Master user already owns a workspace
+  let claimedOwnerBusinessId: string | null = null;
+  try {
+    const claimSnap = await getDoc(doc(db, 'ownerWorkspaces', user.uid));
+    if (claimSnap.exists()) {
+      const claimBizId = String(claimSnap.data()?.businessId || '').trim();
+      if (claimBizId && isValidFirestoreId(claimBizId)) {
+        claimedOwnerBusinessId = claimBizId;
+      }
+    }
+  } catch {
+    // Optional claim lookup
+  }
+
+  // 2. Check the claimed or currently selected/preferred business workspace first
+  const primaryCandidateId = claimedOwnerBusinessId || businessId;
+  const primaryResult = await resolveAccessInSingleBusiness(user, email, primaryCandidateId);
+  if (primaryResult.status === 'AUTHORIZED' || primaryResult.status === 'REVOKED' || options?.skipDiscovery) {
+    return primaryResult;
+  }
+
+  // 3. Discover workspaces across /workspaceAccess, collectionGroup queries, and known candidates
+  const directoryBusinessIds: string[] = [];
+  if (claimedOwnerBusinessId) {
+    directoryBusinessIds.push(claimedOwnerBusinessId);
+  }
+  try {
+    const dirQuery = query(collection(db, 'workspaceAccess'), where('email', '==', email));
+    const dirSnap = await getDocs(dirQuery);
+    const activeOrPending: string[] = [];
+    const fallbackRevoked: string[] = [];
+    dirSnap.forEach((docSnap) => {
+      const entry = docSnap.data() as WorkspaceAccessDirectoryEntry;
+      if (!entry.businessId) return;
+      if (entry.status === 'REVOKED') {
+        fallbackRevoked.push(entry.businessId);
+      } else {
+        activeOrPending.push(entry.businessId);
+      }
+    });
+    directoryBusinessIds.push(...activeOrPending, ...fallbackRevoked);
+  } catch {
+    // Directory query is optional; continue to remaining discovery mechanisms
+  }
+
+  const memberGroupBusinessIds: string[] = [];
+  try {
+    const memberGroupQuery = query(collectionGroup(db, 'members'), where('uid', '==', user.uid));
+    const mgSnap = await getDocs(memberGroupQuery);
+    mgSnap.forEach((docSnap) => {
+      const data = docSnap.data() as CloudMemberRecord;
+      if (data.businessId) memberGroupBusinessIds.push(data.businessId);
+    });
+  } catch {
+    // Requires collectionGroup exemption index in some projects; safely ignored
+  }
+
+  const inviteGroupBusinessIds: string[] = [];
+  try {
+    const inviteGroupQuery = query(collectionGroup(db, 'invites'), where('email', '==', email));
+    const igSnap = await getDocs(inviteGroupQuery);
+    igSnap.forEach((docSnap) => {
+      const data = docSnap.data() as CloudStaffInvite;
+      if (data.businessId) inviteGroupBusinessIds.push(data.businessId);
+    });
+  } catch {
+    // Requires collectionGroup exemption index in some projects; safely ignored
+  }
+
+  const candidatesToTry = buildCandidateBusinessDiscoveryOrder({
+    preferredBusinessId: primaryCandidateId,
+    directoryBusinessIds,
+    memberGroupBusinessIds,
+    inviteGroupBusinessIds,
+    localCandidateBusinessIds: options?.candidateBusinessIds
+  }).filter((id) => id !== primaryCandidateId);
+
+  let firstFailureResult: CloudAccessResolution | null = null;
+  for (const candidateBizId of candidatesToTry) {
+    const candidateRes = await resolveAccessInSingleBusiness(user, email, candidateBizId);
+    if (candidateRes.status === 'AUTHORIZED') {
+      return candidateRes;
+    }
+    if (candidateRes.status === 'REVOKED' && !firstFailureResult) {
+      firstFailureResult = candidateRes;
+    }
+  }
+
+  return firstFailureResult || primaryResult;
 }
 
 export async function pushSyncChannelToCloud(params: {
@@ -1292,7 +1835,7 @@ export async function updateCloudBusinessPolicy(params: {
 
 /**
  * Lists all registered cloud tenant workspaces from Firestore (/businesses).
- * Permitted strictly when the verified App Creator (samjhamnamalla22444@gmail.com) is signed in.
+ * Permitted strictly when the verified App Creator / Super Admin is signed in.
  */
 export async function listAllCloudBusinessesForCreator(): Promise<CloudWorkspaceMeta[]> {
   const path = 'businesses';
@@ -1307,7 +1850,7 @@ export async function listAllCloudBusinessesForCreator(): Promise<CloudWorkspace
         tagline: raw.tagline,
         businessType: raw.businessType,
         ownerUid: raw.ownerUid || '',
-        ownerEmail: raw.ownerEmail || '',
+        ownerEmail: redactProtectedEmail(raw.ownerEmail, ''),
         status: raw.status === 'SUSPENDED' || raw.status === 'INACTIVE' ? raw.status : 'ACTIVE',
         enabledModules: Array.isArray(raw.enabledModules) ? raw.enabledModules : [],
         currencySymbol: raw.currencySymbol || 'Rs.',
@@ -1328,7 +1871,10 @@ export async function listCloudInvites(businessId: string): Promise<CloudStaffIn
   const path = `businesses/${businessId}/invites`;
   try {
     const snap = await getDocs(collection(db, 'businesses', businessId, 'invites'));
-    return snap.docs.map((d) => d.data() as CloudStaffInvite);
+    return snap.docs.map((d) => {
+      const data = d.data() as CloudStaffInvite;
+      return isMasterOwnerEmail(data.email) ? { ...data, email: 'Protected' } : data;
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -1338,7 +1884,13 @@ export async function listCloudMembers(businessId: string): Promise<CloudMemberR
   const path = `businesses/${businessId}/members`;
   try {
     const snap = await getDocs(collection(db, 'businesses', businessId, 'members'));
-    return snap.docs.map((d) => d.data() as CloudMemberRecord);
+    return snap.docs.map((d) => {
+      const data = d.data() as CloudMemberRecord;
+      if (data.role === 'SUPER_ADMIN' || isMasterOwnerEmail(data.email)) {
+        return { ...data, name: 'Super Admin', email: 'Protected' };
+      }
+      return data;
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -1346,6 +1898,7 @@ export async function listCloudMembers(businessId: string): Promise<CloudMemberR
 
 export async function createCloudStaffInvite(params: {
   businessId: string;
+  businessName?: string;
   ownerUid: string;
   email: string;
   staffName: string;
@@ -1354,7 +1907,7 @@ export async function createCloudStaffInvite(params: {
 }): Promise<CloudStaffInvite> {
   const cleanEmail = normalizeEmail(params.email);
   if (!cleanEmail || !cleanEmail.includes('@') || cleanEmail.length < 5 || cleanEmail.length > 128) {
-    throw new Error('Please enter a valid employee Gmail address.');
+    throw new Error('Please enter a valid employee email address.');
   }
   const cleanName = truncateStr(params.staffName, 120);
   if (!cleanName) {
@@ -1385,6 +1938,20 @@ export async function createCloudStaffInvite(params: {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+    try {
+      await upsertWorkspaceAccessEntry({
+        businessId: params.businessId,
+        inviteId,
+        ownerUid: params.ownerUid,
+        email: cleanEmail,
+        staffName: cleanName,
+        businessName: params.businessName,
+        role: params.role,
+        status: 'PENDING'
+      });
+    } catch {
+      // Best-effort cross-workspace directory indexing
+    }
     return docPayload;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -1406,6 +1973,18 @@ export async function revokeCloudStaffInvite(
       status: 'REVOKED',
       updatedAt: serverTimestamp()
     });
+    try {
+      const accessRef = doc(db, 'workspaceAccess', getWorkspaceAccessDocId(businessId, inviteId));
+      const snap = await getDoc(accessRef);
+      if (snap.exists()) {
+        await updateDoc(accessRef, {
+          status: 'REVOKED',
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch {
+      // Best-effort directory revocation sync
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -1439,6 +2018,184 @@ export async function updateCloudMemberAccess(params: {
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
+}
+
+export async function deleteCloudStaffInvite(
+  businessId: string,
+  inviteId: string,
+  actorRole?: StaffRole,
+  existingInviteRole?: StaffRole
+): Promise<void> {
+  if (actorRole && existingInviteRole && !canActorManageStaffMember(actorRole, existingInviteRole)) {
+    throw new Error(`Permission denied: ${actorRole} cannot remove invite for ${existingInviteRole}.`);
+  }
+  const path = `businesses/${businessId}/invites/${inviteId}`;
+  try {
+    await deleteDoc(doc(db, 'businesses', businessId, 'invites', inviteId));
+    try {
+      const accessRef = doc(db, 'workspaceAccess', getWorkspaceAccessDocId(businessId, inviteId));
+      await deleteDoc(accessRef);
+    } catch {
+      // Best-effort directory cleanup
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function deleteCloudMemberAccess(params: {
+  businessId: string;
+  memberUid: string;
+  ownerUid?: string;
+  existingEmail?: string;
+  actorRole?: StaffRole;
+  existingTargetRole?: StaffRole;
+}): Promise<void> {
+  if (isMasterOwnerEmail(params.existingEmail)) {
+    throw new Error('Cannot remove Master Owner access.');
+  }
+  if (params.ownerUid && params.memberUid === params.ownerUid) {
+    throw new Error('Cannot remove the workspace Owner.');
+  }
+  if (params.existingTargetRole === 'OWNER' || params.existingTargetRole === 'SUPER_ADMIN') {
+    throw new Error('Cannot remove OWNER or SUPER_ADMIN cloud workspace access.');
+  }
+  if (params.actorRole && params.existingTargetRole && !canActorManageStaffMember(params.actorRole, params.existingTargetRole)) {
+    throw new Error(`Permission denied: ${params.actorRole} cannot remove ${params.existingTargetRole} access.`);
+  }
+  const path = `businesses/${params.businessId}/members/${params.memberUid}`;
+  try {
+    await deleteDoc(doc(db, 'businesses', params.businessId, 'members', params.memberUid));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+const VALID_STAFF_ROLES = new Set<StaffRole>([
+  'SUPER_ADMIN',
+  'OWNER',
+  'ADMIN',
+  'MANAGER',
+  'CASHIER',
+  'WAITER',
+  'KITCHEN',
+  'RECEPTIONIST',
+  'HOUSEKEEPING',
+  'ACCOUNTANT',
+  'INVENTORY_STAFF',
+  'STAFF'
+]);
+
+export function getStaffAccountSyncFingerprint(staff: StaffUser): string {
+  return JSON.stringify({
+    id: staff.id,
+    username: staff.username || '',
+    name: staff.name || '',
+    nepaliName: staff.nepaliName || '',
+    role: staff.role,
+    pinHash: staff.pinHash || '',
+    salt: staff.salt || '',
+    isActive: Boolean(staff.isActive),
+    email: staff.email || '',
+    phone: staff.phone || '',
+    mustChangePin: Boolean(staff.mustChangePin),
+    lastPinChangedAt: staff.lastPinChangedAt || '',
+    linkedFirebaseUid: staff.linkedFirebaseUid || ''
+  });
+}
+
+export function buildSanitizedStaffAccountPayload(
+  staff: StaffUser,
+  businessId: string,
+  ownerUid: string,
+  updatedByUid: string,
+  isNew: boolean
+): Record<string, any> {
+  const safeRole: StaffRole = VALID_STAFF_ROLES.has(staff.role) ? staff.role : 'STAFF';
+  const clean: Record<string, any> = {
+    id: staff.id,
+    businessId,
+    ownerUid,
+    updatedByUid,
+    username: truncateStr(staff.username || staff.id, 128) || staff.id.slice(0, 128),
+    name: truncateStr(staff.name || staff.username || 'Staff', 120) || 'Staff',
+    role: safeRole,
+    pinHash: truncateStr(staff.pinHash || '', 128) || '',
+    salt: truncateStr(staff.salt || 'hb-salt', 64) || 'hb-salt',
+    isActive: Boolean(staff.isActive),
+    updatedAt: serverTimestamp()
+  };
+
+  if (isNew) {
+    clean.createdAt = serverTimestamp();
+  }
+  const nepaliName = truncateStr(staff.nepaliName, 120);
+  if (nepaliName) clean.nepaliName = nepaliName;
+  const email = truncateStr(staff.email, 128);
+  if (email && safeRole !== 'SUPER_ADMIN' && !isMasterOwnerEmail(email)) clean.email = email;
+  if (isMasterOwnerEmail(clean.username)) clean.username = 'superadmin';
+  const phone = truncateStr(staff.phone, 40);
+  if (phone) clean.phone = phone;
+  if (typeof staff.mustChangePin === 'boolean') clean.mustChangePin = staff.mustChangePin;
+  const lastPinChangedAt = truncateStr(staff.lastPinChangedAt, 64);
+  if (lastPinChangedAt) clean.lastPinChangedAt = lastPinChangedAt;
+  const linkedFirebaseUid = truncateStr(staff.linkedFirebaseUid, 128);
+  if (linkedFirebaseUid) clean.linkedFirebaseUid = linkedFirebaseUid;
+  const lastLogin = truncateStr(staff.lastLogin, 64);
+  if (lastLogin) clean.lastLogin = lastLogin;
+
+  return sanitizeForFirestore(clean);
+}
+
+export async function syncStaffAccountToCloud(params: {
+  staff: StaffUser;
+  businessId: string;
+  ownerUid: string;
+  userUid: string;
+  isOwnerOrMaster: boolean;
+}): Promise<void> {
+  const { staff, businessId, ownerUid, userUid, isOwnerOrMaster } = params;
+  if (!isValidFirestoreId(staff.id) || !isValidFirestoreId(businessId)) return;
+  if (!isOwnerOrMaster && staff.role === 'SUPER_ADMIN') return;
+
+  const staffPath = `businesses/${businessId}/staffAccounts/${staff.id}`;
+  return enqueueSerializedDocWrite(staffPath, async () => {
+    const staffRef = doc(db, 'businesses', businessId, 'staffAccounts', staff.id);
+    try {
+      const snap = await getDoc(staffRef);
+      if (!snap.exists()) {
+        await setDoc(
+          staffRef,
+          buildSanitizedStaffAccountPayload(staff, businessId, ownerUid, userUid, true)
+        );
+        return;
+      }
+      const updatePayload = buildSanitizedStaffAccountPayload(staff, businessId, ownerUid, userUid, false);
+      delete updatePayload.id;
+      delete updatePayload.businessId;
+      delete updatePayload.ownerUid;
+      delete updatePayload.createdAt;
+      await updateDoc(staffRef, updatePayload);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, staffPath);
+    }
+  });
+}
+
+export async function deleteStaffAccountFromCloud(params: {
+  businessId: string;
+  staffId: string;
+}): Promise<void> {
+  const { businessId, staffId } = params;
+  if (!isValidFirestoreId(staffId) || !isValidFirestoreId(businessId)) return;
+  const staffPath = `businesses/${businessId}/staffAccounts/${staffId}`;
+  return enqueueSerializedDocWrite(staffPath, async () => {
+    try {
+      await deleteDoc(doc(db, 'businesses', businessId, 'staffAccounts', staffId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, staffPath);
+    }
+  });
 }
 
 /**
@@ -1735,16 +2492,18 @@ export async function backfillShardedSubcollections(params: {
   knownCloudCreditNoteIds?: Set<string>;
   knownCloudJournalIds?: Set<string>;
   knownCloudAuditIds?: Set<string>;
-}): Promise<{ migratedOrders: number; migratedCreditNotes: number; migratedJournals: number; migratedAudits: number }> {
+  knownCloudStaffIds?: Set<string>;
+}): Promise<{ migratedOrders: number; migratedCreditNotes: number; migratedJournals: number; migratedAudits: number; migratedStaff: number }> {
   const { businessId, ownerUid, userUid, effectiveRole, isOwnerOrMaster, state } = params;
   if (!isValidFirestoreId(businessId) || !ownerUid || !userUid) {
-    return { migratedOrders: 0, migratedCreditNotes: 0, migratedJournals: 0, migratedAudits: 0 };
+    return { migratedOrders: 0, migratedCreditNotes: 0, migratedJournals: 0, migratedAudits: 0, migratedStaff: 0 };
   }
 
   let migratedOrders = 0;
   let migratedCreditNotes = 0;
   let migratedJournals = 0;
   let migratedAudits = 0;
+  let migratedStaff = 0;
 
   // 1. Backfill orders not yet confirmed in /orders subcollection (cap 150 per startup pass)
   if (canRoleReadChannel(effectiveRole, 'orders_live', isOwnerOrMaster)) {
@@ -1804,7 +2563,28 @@ export async function backfillShardedSubcollections(params: {
     migratedAudits += 1;
   }
 
-  return { migratedOrders, migratedCreditNotes, migratedJournals, migratedAudits };
+  // 4. Backfill Staff Accounts (Owner, Admin, Manager) into /staffAccounts subcollection
+  if (isOwnerOrMaster || effectiveRole === 'ADMIN' || effectiveRole === 'MANAGER') {
+    const candidateStaff = (state.staffUsers || []).filter(
+      (s) =>
+        isValidFirestoreId(s.id) &&
+        !params.knownCloudStaffIds?.has(s.id) &&
+        (isOwnerOrMaster || s.role !== 'SUPER_ADMIN')
+    ).slice(0, 150);
+    for (const s of candidateStaff) {
+      await syncStaffAccountToCloud({
+        staff: s,
+        businessId,
+        ownerUid,
+        userUid,
+        isOwnerOrMaster
+      });
+      params.knownCloudStaffIds?.add(s.id);
+      migratedStaff += 1;
+    }
+  }
+
+  return { migratedOrders, migratedCreditNotes, migratedJournals, migratedAudits, migratedStaff };
 }
 
 export interface CloudSubscriptionsOptions {
@@ -1819,6 +2599,7 @@ export interface CloudSubscriptionsOptions {
   onShardedCreditNotesSnapshot?: (creditNotes: CreditNoteRecord[]) => void;
   onShardedJournalEntriesSnapshot?: (entries: JournalEntry[]) => void;
   onShardedAuditLogsSnapshot?: (logs: AuditLogEntry[]) => void;
+  onStaffAccountsSnapshot?: (staffUsers: StaffUser[]) => void;
 }
 
 export function subscribeToBusinessCloudChannels(opts: CloudSubscriptionsOptions): () => void {
@@ -2045,7 +2826,57 @@ export function subscribeToBusinessCloudChannels(opts: CloudSubscriptionsOptions
     unsubscribers.push(auditUnsub);
   }
 
-  // 7. For staff members, watch their own /members/{uid} doc for instant remote revocation / role change
+  // 7. Subscribe to /businesses/{businessId}/staffAccounts for real-time Owner/Admin/Manager staff & PIN sync
+  if (
+    opts.onStaffAccountsSnapshot &&
+    (opts.isOwnerOrMaster || opts.effectiveRole === 'ADMIN' || opts.effectiveRole === 'MANAGER')
+  ) {
+    let sawNonEmptyStaffCollection = false;
+    const staffQ = query(
+      collection(db, 'businesses', opts.businessId, 'staffAccounts'),
+      limit(200)
+    );
+    const staffUnsub = onSnapshot(
+      staffQ,
+      (snap) => {
+        if (snap.empty && !sawNonEmptyStaffCollection) {
+          return;
+        }
+        sawNonEmptyStaffCollection = true;
+        const staffList: StaffUser[] = snap.docs.map((d) => {
+          const data = d.data() as Record<string, any>;
+          return {
+            id: data.id || d.id,
+            username: data.username || d.id,
+            name: data.name || data.username || 'Staff',
+            nepaliName: data.nepaliName,
+            role: (VALID_STAFF_ROLES.has(data.role) ? data.role : 'STAFF') as StaffRole,
+            pinHash: data.pinHash || '',
+            salt: data.salt || '',
+            isActive: data.isActive !== false,
+            businessId: data.businessId || opts.businessId,
+            email: data.email,
+            phone: data.phone,
+            mustChangePin: typeof data.mustChangePin === 'boolean' ? data.mustChangePin : undefined,
+            lastPinChangedAt: data.lastPinChangedAt,
+            linkedFirebaseUid: data.linkedFirebaseUid,
+            lastLogin: data.lastLogin,
+            createdAt:
+              data.createdAt instanceof Timestamp
+                ? data.createdAt.toDate().toISOString().split('T')[0]
+                : (data.createdAt || new Date().toISOString().split('T')[0])
+          };
+        });
+        opts.onStaffAccountsSnapshot?.(staffList);
+      },
+      (error) => {
+        console.warn('[CloudSync] Sharded staffAccounts read warning:', error);
+      }
+    );
+    unsubscribers.push(staffUnsub);
+  }
+
+  // 8. For staff members, watch their own /members/{uid} doc for instant remote revocation / role change
   if (!opts.isOwnerOrMaster && opts.onMemberSelfChanged) {
     const memberPath = `businesses/${opts.businessId}/members/${opts.userUid}`;
     const memUnsub = onSnapshot(

@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from 'react';
+import { NumberInput } from '../common/NumberInput';
+import { sanitizeNumericDraft } from '../../utils/numberInput';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -2625,10 +2627,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             <div className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-600 font-bold mb-1">Actual Verified Amount (Rs.):</label>
-                <input
-                  type="number"
+                <NumberInput
+                  min={0}
                   value={reconcileActualAmount}
-                  onChange={(e) => setReconcileActualAmount(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setReconcileActualAmount(val)}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold font-mono-num focus:bg-white"
                 />
               </div>
@@ -2732,10 +2734,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
               <div>
                 <label className="block text-slate-600 font-bold mb-1">Initial Opening Balance (Rs.):</label>
-                <input
-                  type="number"
+                <NumberInput
+                  allowNegative
                   value={newAccBalance}
-                  onChange={(e) => setNewAccBalance(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setNewAccBalance(val)}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono-num"
                 />
               </div>
@@ -2794,12 +2796,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <div>
                 <label className="block text-slate-600 font-bold mb-1">Opening Amount ({currency}):</label>
                 <input
-                  type="number"
-                  min={1}
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   required
                   value={openingAmount}
-                  onChange={(e) => setOpeningAmount(e.target.value)}
+                  onChange={(e) => setOpeningAmount(sanitizeNumericDraft(e.target.value))}
                   placeholder="e.g. 50000"
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono-num font-bold text-sm"
                 />

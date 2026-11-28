@@ -2225,11 +2225,27 @@ export function getInitialAppState(): AppState {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.menuItems && parsed.orders && parsed.inventoryItems) {
+        const cleanedSecurity = parsed.settings?.securitySettings
+          ? (() => {
+              const { masterOwnerEmail: _dropped, ...restSec } = parsed.settings.securitySettings;
+              return restSec;
+            })()
+          : parsed.settings?.securitySettings;
+        const cleanedStaff = (Array.isArray(parsed.staffUsers) && parsed.staffUsers.length > 0)
+          ? parsed.staffUsers.map((s: StaffUser) =>
+              s.role === 'SUPER_ADMIN'
+                ? { ...s, email: undefined, username: s.username?.includes('@') ? 'superadmin' : s.username }
+                : s
+            )
+          : INITIAL_STAFF_USERS;
         return {
           ...parsed,
+          settings: parsed.settings
+            ? { ...parsed.settings, securitySettings: cleanedSecurity }
+            : parsed.settings,
           expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
           dayClosings: Array.isArray(parsed.dayClosings) ? parsed.dayClosings : [],
-          staffUsers: (Array.isArray(parsed.staffUsers) && parsed.staffUsers.length > 0) ? parsed.staffUsers : INITIAL_STAFF_USERS,
+          staffUsers: cleanedStaff,
           auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [],
           roomTypes: Array.isArray(parsed.roomTypes) ? parsed.roomTypes : INITIAL_ROOM_TYPES,
           resortRooms: Array.isArray(parsed.resortRooms) ? parsed.resortRooms : CLEAN_RESORT_ROOMS,
@@ -2270,7 +2286,22 @@ export function saveAppState(state: AppState): boolean {
 }
 
 export function exportBackupJSON(state: AppState) {
-  const jsonStr = JSON.stringify(state, null, 2);
+  const sanitizedSecurity = state.settings?.securitySettings
+    ? (() => {
+        const { masterOwnerEmail: _dropped, ...restSec } = state.settings.securitySettings;
+        return restSec;
+      })()
+    : state.settings?.securitySettings;
+  const sanitizedState: AppState = {
+    ...state,
+    settings: state.settings ? { ...state.settings, securitySettings: sanitizedSecurity } : state.settings,
+    staffUsers: Array.isArray(state.staffUsers)
+      ? state.staffUsers.map((s) =>
+          s.role === 'SUPER_ADMIN' ? { ...s, email: undefined } : s
+        )
+      : state.staffUsers
+  };
+  const jsonStr = JSON.stringify(sanitizedState, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

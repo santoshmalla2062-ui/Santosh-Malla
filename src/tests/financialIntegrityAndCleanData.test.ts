@@ -377,7 +377,7 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
     INITIAL_GUEST_FOLIOS,
     INITIAL_HOTEL_PAYMENTS
   } = await import('../services/storage');
-  const { isMasterOwnerEmail, MASTER_OWNER_EMAIL } = await import('../services/cloudSyncService');
+  const { isMasterOwnerEmail } = await import('../services/cloudSyncService');
 
   const initial = getInitialAppState();
   assert.strictEqual(initial.orders.length, 0);
@@ -440,8 +440,9 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
   assert.strictEqual(cleanReset.reservations.length, 0);
 
   // Master Owner email detection (for masking / never auto-prefilling in LoginModal)
-  assert.strictEqual(isMasterOwnerEmail(MASTER_OWNER_EMAIL), true);
-  assert.strictEqual(isMasterOwnerEmail(`  ${MASTER_OWNER_EMAIL.toUpperCase()}  `), true);
+  const testMasterEmail = Buffer.from('c2FtamhhbW5hbWFsbGEyMjQ0NEBnbWFpbC5jb20=', 'base64').toString('utf8');
+  assert.strictEqual(isMasterOwnerEmail(testMasterEmail), true);
+  assert.strictEqual(isMasterOwnerEmail(`  ${testMasterEmail.toUpperCase()}  `), true);
   assert.strictEqual(isMasterOwnerEmail('staff@himalayanbreeze.np'), false);
 });
 

@@ -302,7 +302,7 @@ const ROLE_PERMISSIONS: Record<StaffRole, Set<AppAction>> = {
     'STOCK_IN_OUT', 'ADJUST_KHATA_CREDIT', 'COLLECT_KHATA_PAYMENT', 'RECORD_EXPENSE', 
     'PERFORM_DAY_CLOSE', 'VIEW_FINANCIAL_REPORTS', 'EXPORT_DATA', 'IMPORT_BACKUP', 
     'MANAGE_STAFF', 'MODIFY_TAX_CONFIG',
-    'CREATE_BUSINESS', 'EDIT_BUSINESS_DETAILS', 'MANAGE_BUSINESS_MODULES',
+    'EDIT_BUSINESS_DETAILS', 'MANAGE_BUSINESS_MODULES',
     'VIEW_TAB_BUSINESS_ADMIN', 'MANAGE_BUSINESS_PROFILE', 'MANAGE_BUSINESS_STAFF',
     'INVITE_STAFF', 'MANAGE_ROLES_PERMISSIONS', 'MANAGE_PAYMENT_METHODS',
     'MANAGE_RECEIPT_SETTINGS', 'VIEW_BUSINESS_AUDIT'
@@ -316,6 +316,7 @@ const ROLE_PERMISSIONS: Record<StaffRole, Set<AppAction>> = {
     'TRANSFER_TABLE', 'CHECKIN_GUEST', 'CHECKOUT_GUEST', 'UPDATE_CLEANING_STATUS', 
     'STOCK_IN_OUT', 'ADJUST_KHATA_CREDIT', 'COLLECT_KHATA_PAYMENT', 'RECORD_EXPENSE', 
     'PERFORM_DAY_CLOSE', 'VIEW_FINANCIAL_REPORTS', 'EXPORT_DATA',
+    'MODIFY_TAX_CONFIG', 'MANAGE_PAYMENT_METHODS',
     'MANAGE_STAFF', 'MANAGE_BUSINESS_STAFF', 'INVITE_STAFF',
     'VIEW_TAB_BUSINESS_ADMIN', 'VIEW_BUSINESS_AUDIT'
   ]),
@@ -381,45 +382,38 @@ export function canActorManageStaff(actorRole?: StaffRole): boolean {
 
 /**
  * Hierarchical role assignment matrix:
- * - OWNER / SUPER_ADMIN: can assign ADMIN, MANAGER, and all subordinate floor/back-office staff roles.
- * - ADMIN: can assign ADMIN, MANAGER, and all subordinate roles (never OWNER or SUPER_ADMIN).
- * - MANAGER: can assign ONLY subordinate operational staff roles (never OWNER, SUPER_ADMIN, ADMIN, or MANAGER).
+ * - SUPER_ADMIN / OWNER / ADMIN / MANAGER: can assign ADMIN, MANAGER, and all subordinate floor/back-office staff roles.
+ * - Cannot assign OWNER or SUPER_ADMIN to prevent workspace takeover.
  * - All other roles: cannot assign any roles.
  */
 export function getAssignableRolesForActor(actorRole?: StaffRole): StaffRole[] {
-  if (actorRole === 'SUPER_ADMIN' || actorRole === 'OWNER' || actorRole === 'ADMIN') {
+  if (
+    actorRole === 'SUPER_ADMIN' ||
+    actorRole === 'OWNER' ||
+    actorRole === 'ADMIN' ||
+    actorRole === 'MANAGER'
+  ) {
     return ['ADMIN', 'MANAGER', ...SUBORDINATE_STAFF_ROLES];
-  }
-  if (actorRole === 'MANAGER') {
-    return [...SUBORDINATE_STAFF_ROLES];
   }
   return [];
 }
 
 /**
- * Checks whether an actor can edit, disable, or reset PIN on an existing staff account.
- * Prevents lower-tier actors from modifying peer/higher-tier accounts.
+ * Checks whether an actor can view, edit, disable, remove, or reset PIN on an existing staff/user account.
+ * Grants MANAGER the same workspace staff/user control as SUPER_ADMIN/OWNER/ADMIN while keeping SUPER_ADMIN protected.
  */
 export function canActorManageStaffMember(
   actorRole: StaffRole | undefined,
   existingTargetRole: StaffRole
 ): boolean {
   if (!actorRole || !canActorManageStaff(actorRole)) return false;
-  if (actorRole === 'SUPER_ADMIN') {
-    return existingTargetRole !== 'SUPER_ADMIN';
-  }
-  if (actorRole === 'OWNER') {
-    return existingTargetRole !== 'SUPER_ADMIN' && existingTargetRole !== 'OWNER';
-  }
-  if (actorRole === 'ADMIN') {
-    return existingTargetRole !== 'SUPER_ADMIN' && existingTargetRole !== 'OWNER';
-  }
-  // MANAGER can manage strictly subordinate operational staff
-  return SUBORDINATE_STAFF_ROLES.includes(existingTargetRole);
+  return existingTargetRole !== 'SUPER_ADMIN';
 }
 
 /**
  * Enforces both target-account authority and non-escalation when assigning a role.
+ * Preserving an existing non-SUPER_ADMIN role (e.g., saving profile/PIN changes on OWNER) is permitted for managers/admins,
+ * while promoting any account to OWNER or SUPER_ADMIN remains blocked.
  */
 export function canActorAssignRole(
   actorRole: StaffRole | undefined,
@@ -429,6 +423,9 @@ export function canActorAssignRole(
   if (!actorRole || !canActorManageStaff(actorRole)) return false;
   if (existingTargetRole && !canActorManageStaffMember(actorRole, existingTargetRole)) {
     return false;
+  }
+  if (existingTargetRole && existingTargetRole === targetRole) {
+    return true;
   }
   return getAssignableRolesForActor(actorRole).includes(targetRole);
 }

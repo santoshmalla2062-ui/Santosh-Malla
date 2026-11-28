@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Edit2, DollarSign, Check, Tag, AlertCircle } from 'lucide-react';
 import { MenuItem, ItemCategory } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 
 interface QuickPriceEditModalProps {
   item: MenuItem;
@@ -107,13 +108,11 @@ export const QuickPriceEditModal: React.FC<QuickPriceEditModalProps> = ({
                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-emerald-800">
                   {currencySymbol}
                 </span>
-                <input
-                  type="number"
+                <NumberInput
                   required
-                  min="1"
-                  step="1"
+                  min={1}
                   value={price}
-                  onChange={(e) => setPrice(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setPrice(val)}
                   className="w-full pl-8 pr-3 py-1.5 bg-white border border-emerald-300 rounded-lg font-black font-mono-num text-sm text-emerald-950 focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -127,12 +126,10 @@ export const QuickPriceEditModal: React.FC<QuickPriceEditModalProps> = ({
                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-bold text-slate-500">
                   {currencySymbol}
                 </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
+                <NumberInput
+                  min={0}
                   value={costPrice}
-                  onChange={(e) => setCostPrice(Number(e.target.value) || 0)}
+                  onValueChange={(val) => setCostPrice(val)}
                   className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num text-sm text-slate-800"
                 />
               </div>

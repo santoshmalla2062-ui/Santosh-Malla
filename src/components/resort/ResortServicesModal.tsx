@@ -15,6 +15,7 @@ import {
   Smile, 
   AlertCircle 
 } from 'lucide-react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   BusinessSettings, 
   FolioCategory, 
@@ -56,7 +57,7 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
   const [selectedServiceId, setSelectedServiceId] = useState<string>(services[0]?.id || '');
   const [customDescription, setCustomDescription] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
-  const [customPrice, setCustomPrice] = useState<number>(0);
+  const [customPrice, setCustomPrice] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<FolioCategory>('SPA');
   const [postSuccess, setPostSuccess] = useState<string | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
   const selectedRoom = occupiedRooms.find(r => r.id === selectedRoomId);
   const selectedReservation = reservations.find(r => r.id === selectedRoom?.currentReservationId);
   const selectedService = services.find(s => s.id === selectedServiceId);
+  const effectiveUnitPrice = customPrice !== null ? customPrice : (selectedService?.price || 0);
 
   const handleSelectServicePreset = (service: ResortService) => {
     setSelectedServiceId(service.id);
@@ -87,7 +89,7 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
     }
     setPostError(null);
 
-    const price = customPrice > 0 ? customPrice : (selectedService?.price || 0);
+    const price = effectiveUnitPrice;
     const desc = customDescription.trim() || selectedService?.name || 'Resort Service';
     const total = price * quantity;
 
@@ -311,11 +313,12 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Quantity:
                   </label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
+                    emptyValue={1}
                     value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
+                    onValueChange={(val) => setQuantity(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono-num font-bold"
                     required
                   />
@@ -325,12 +328,10 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Unit Price ({settings.currencySymbol}):
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="50"
-                    value={customPrice || selectedService?.price || 0}
-                    onChange={(e) => setCustomPrice(Number(e.target.value))}
+                  <NumberInput
+                    min={0}
+                    value={effectiveUnitPrice}
+                    onValueChange={(val) => setCustomPrice(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono-num font-bold"
                     required
                   />
@@ -341,7 +342,7 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex justify-between items-center text-xs">
                 <span className="font-bold text-slate-700">Total Charge to Post:</span>
                 <span className="text-base font-black text-emerald-900 font-mono-num">
-                  {settings.currencySymbol} {((customPrice || selectedService?.price || 0) * quantity).toFixed(2)}
+                  {settings.currencySymbol} {(effectiveUnitPrice * quantity).toFixed(2)}
                 </span>
               </div>
 
@@ -450,12 +451,10 @@ export const ResortServicesModal: React.FC<ResortServicesModalProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Price ({settings.currencySymbol}):
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="50"
+                  <NumberInput
+                    min={0}
                     value={newServicePrice}
-                    onChange={(e) => setNewServicePrice(Number(e.target.value))}
+                    onValueChange={(val) => setNewServicePrice(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-mono-num font-bold"
                     required
                   />

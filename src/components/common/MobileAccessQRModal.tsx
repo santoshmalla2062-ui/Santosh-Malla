@@ -5,7 +5,6 @@ import {
   Download,
   Copy,
   Check,
-  Smartphone,
   Share2,
   ExternalLink,
   AlertTriangle,
@@ -155,11 +154,11 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
     if (!canNativeShare) return;
     try {
       await navigator.share({
-        title: businessName || 'Himalayan Breeze POS',
+        title: businessName || 'CAFe Host',
         text:
           lang === 'ne'
-            ? `${businessName || 'Himalayan Breeze POS'} मोबाइल वा कम्प्युटरमा खोल्नुहोस् / डाउनलोड गर्नुहोस्:`
-            : `Open or install ${businessName || 'Himalayan Breeze POS'} on your device:`,
+            ? `${businessName || 'CAFe Host'} मोबाइल वा कम्प्युटरमा खोल्नुहोस् / डाउनलोड गर्नुहोस्:`
+            : `Open or install ${businessName || 'CAFe Host'} on your device:`,
         url: targetUrl
       });
     } catch {
@@ -587,9 +586,12 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
         {/* Clean Single-Row Modal Header */}
         <div className="px-5 py-4 sm:px-6 bg-slate-900 text-white flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-              <Smartphone className="h-5 w-5" />
-            </div>
+            <img
+              src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
+              alt={businessName || 'CAFe Host'}
+              referrerPolicy="no-referrer"
+              className="h-10 w-10 rounded-xl border border-white/15 bg-slate-900 shrink-0"
+            />
             <div className="min-w-0">
               <h2
                 id="mobile-qr-modal-title"
@@ -600,7 +602,7 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
                   : 'Mobile Access & App Download QR'}
               </h2>
               <p className="text-xs text-slate-300 truncate">
-                {businessName || 'Himalayan Breeze POS'}
+                {businessName || 'CAFe Host'}
                 {' · '}
                 {lang === 'ne' ? 'स्क्यान गरेर तुरुन्तै खोल्नुहोस् / .APK डाउनलोड गर्नुहोस्' : 'Scan to install or download .APK'}
               </p>

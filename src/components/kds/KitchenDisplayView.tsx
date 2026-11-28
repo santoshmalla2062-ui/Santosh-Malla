@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   ChefHat, 
   Clock, 
@@ -832,12 +833,11 @@ export const KitchenDisplayView: React.FC<KitchenDisplayViewProps> = ({
                 <label className="text-xs font-bold text-slate-800 block mb-1">
                   Wasted Quantity:
                 </label>
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
+                <NumberInput
+                  min={0.1}
+                  emptyValue={1}
                   value={wasteQty}
-                  onChange={(e) => setWasteQty(Number(e.target.value) || 1)}
+                  onValueChange={(val) => setWasteQty(val)}
                   required
                   className="w-full p-2.5 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />

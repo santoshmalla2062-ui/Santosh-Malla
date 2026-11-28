@@ -15,6 +15,7 @@ import { BusinessSettings, DayClosingRecord, Expense, ExpenseCategory, HotelPaym
 import { Language } from '../../utils/translations';
 import { hasPermission, validateExpense } from '../../services/security';
 import { classifyOrderPayment } from '../../services/orderAudit';
+import { NumberInput } from '../common/NumberInput';
 
 interface DayClosingViewProps {
   expenses: Expense[];
@@ -254,10 +255,10 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                   <span className="text-slate-500 text-[11px]">बिहान काउन्टरमा राखिएको खुद्रा रकम</span>
                 </div>
                 <div className="w-36">
-                  <input
-                    type="number"
+                  <NumberInput
+                    min={0}
                     value={openingCash}
-                    onChange={(e) => setOpeningCash(Number(e.target.value))}
+                    onValueChange={(val) => setOpeningCash(val)}
                     className="w-full text-right px-3 py-1.5 bg-white border border-slate-300 rounded font-mono-num font-bold text-sm"
                   />
                 </div>
@@ -317,10 +318,10 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                   <span className="text-amber-800 text-[11px]">काउन्टरका सबै नोट गनेर लेख्नुहोस्</span>
                 </div>
                 <div className="w-36">
-                  <input
-                    type="number"
+                  <NumberInput
+                    min={0}
                     value={actualCashCounted}
-                    onChange={(e) => setActualCashCounted(Number(e.target.value))}
+                    onValueChange={(val) => setActualCashCounted(val)}
                     className="w-full text-right px-3 py-1.5 bg-white border border-amber-400 rounded font-mono-num font-black text-base text-slate-950"
                   />
                 </div>
@@ -554,12 +555,11 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">
                     {lang === 'ne' ? 'रकम (रू.) *' : 'Amount (Rs.) *'}
                   </label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
                     required
                     value={expAmount}
-                    onChange={(e) => setExpAmount(Number(e.target.value))}
+                    onValueChange={(val) => setExpAmount(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-rose-700"
                   />
                 </div>

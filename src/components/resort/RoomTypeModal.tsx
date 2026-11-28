@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { BusinessSettings, RoomType, Session } from '../../types';
 import { Language } from '../../utils/translations';
+import { NumberInput } from '../common/NumberInput';
 
 interface RoomTypeModalProps {
   roomTypes: RoomType[];
@@ -229,35 +230,31 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Base Price / Night ({settings.currencySymbol}):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
+                  <NumberInput
+                    min={0}
                     value={basePrice}
-                    onChange={(e) => setBasePrice(Number(e.target.value))}
+                    onValueChange={(val) => setBasePrice(val)}
                     className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                     required
                   />
                 </div>
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Extra Guest ({settings.currencySymbol}):</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="50"
+                  <NumberInput
+                    min={0}
                     value={extraGuestPrice}
-                    onChange={(e) => setExtraGuestPrice(Number(e.target.value))}
+                    onValueChange={(val) => setExtraGuestPrice(val)}
                     className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                   />
                 </div>
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Number of Beds:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
+                  <NumberInput
+                    min={1}
+                    max={10}
+                    integer
                     value={numberOfBeds}
-                    onChange={(e) => setNumberOfBeds(Number(e.target.value))}
+                    onValueChange={(val) => setNumberOfBeds(val)}
                     className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-900"
                   />
                 </div>
@@ -266,12 +263,12 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Max Adults:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="16"
+                  <NumberInput
+                    min={1}
+                    max={16}
+                    integer
                     value={maxAdults}
-                    onChange={(e) => setMaxAdults(Number(e.target.value))}
+                    onValueChange={(val) => setMaxAdults(val)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                     required
                   />
@@ -279,24 +276,24 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Max Children:</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
+                  <NumberInput
+                    min={0}
+                    max={10}
+                    integer
                     value={maxChildren}
-                    onChange={(e) => setMaxChildren(Number(e.target.value))}
+                    onValueChange={(val) => setMaxChildren(val)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                   />
                 </div>
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Total Capacity:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="20"
+                  <NumberInput
+                    min={1}
+                    max={20}
+                    integer
                     value={totalCapacity}
-                    onChange={(e) => setTotalCapacity(Number(e.target.value))}
+                    onValueChange={(val) => setTotalCapacity(val)}
                     className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg font-mono-num font-bold"
                   />
                 </div>

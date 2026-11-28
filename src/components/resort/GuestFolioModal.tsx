@@ -18,6 +18,7 @@ import {
   CalendarPlus,
   Edit3
 } from 'lucide-react';
+import { NumberInput } from '../common/NumberInput';
 import { 
   BusinessSettings, 
   FolioCategory, 
@@ -449,20 +450,19 @@ export const GuestFolioModal: React.FC<GuestFolioModalProps> = ({
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="number"
-                    min="1"
+                  <NumberInput
+                    min={1}
+                    integer
+                    emptyValue={1}
                     value={chargeQty}
-                    onChange={(e) => setChargeQty(Math.max(1, Number(e.target.value)))}
+                    onValueChange={(val) => setChargeQty(val)}
                     placeholder="Quantity"
                     className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-mono-num"
                   />
-                  <input
-                    type="number"
-                    min="1"
-                    step="50"
+                  <NumberInput
+                    min={1}
                     value={chargeUnitPrice}
-                    onChange={(e) => setChargeUnitPrice(Number(e.target.value))}
+                    onValueChange={(val) => setChargeUnitPrice(val)}
                     placeholder="Unit Price"
                     className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-mono-num font-bold"
                   />
@@ -492,11 +492,10 @@ export const GuestFolioModal: React.FC<GuestFolioModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">Amount ({settings.currencySymbol}):</label>
-                    <input
-                      type="number"
-                      min="1"
+                    <NumberInput
+                      min={1}
                       value={payAmount}
-                      onChange={(e) => setPayAmount(Number(e.target.value))}
+                      onValueChange={(val) => setPayAmount(val)}
                       className="w-full px-3 py-1.5 bg-white border border-emerald-400 rounded-md text-xs font-mono-num font-bold text-emerald-950"
                       required
                     />

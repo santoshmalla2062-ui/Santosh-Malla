@@ -119,15 +119,16 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
             <div className="flex items-center gap-3.5">
               <img
                 src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
-                alt={businessName}
-                className="h-14 w-14 rounded-2xl border border-white/15 shadow-lg bg-slate-800 shrink-0"
+                alt={businessName || 'CAFe Host'}
+                referrerPolicy="no-referrer"
+                className="h-14 w-14 rounded-2xl border border-white/15 shadow-lg bg-slate-900 shrink-0"
               />
               <div>
                 <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-emerald-300 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-md mb-1">
                   {lang === 'ne' ? 'आधिकारिक मोबाइल र डेस्कटप एप' : 'Official POS & Resort App'}
                 </span>
                 <h1 className="text-lg sm:text-xl font-extrabold tracking-tight leading-snug text-white">
-                  {businessName || 'Himalayan Breeze POS'}
+                  {businessName || 'CAFe Host'}
                 </h1>
                 <p className="text-xs text-slate-300 mt-0.5">
                   {tagline ||

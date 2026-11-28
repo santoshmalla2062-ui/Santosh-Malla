@@ -97,6 +97,17 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidOwnerWorkspaceClaim(data, pathOwnerUid) {
+      return data.keys().hasAll(['ownerUid', 'businessId', 'ownerEmail', 'createdAt']) &&
+        data.keys().hasOnly(['ownerUid', 'businessId', 'ownerEmail', 'createdAt']) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == pathOwnerUid &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.ownerEmail is string && data.ownerEmail.size() >= 5 && data.ownerEmail.size() <= 128 &&
+        data.createdAt is timestamp;
+    }
+
     function isValidBusiness(data, pathBizId) {
       return data.keys().hasAll([
           'businessId', 'businessName', 'ownerUid', 'ownerEmail',
@@ -398,6 +409,69 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidWorkspaceAccess(data, pathAccessId) {
+      return data.keys().hasAll([
+          'accessId', 'businessId', 'inviteId', 'ownerUid',
+          'email', 'role', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'accessId', 'businessId', 'inviteId', 'ownerUid',
+          'email', 'staffName', 'businessName', 'role',
+          'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.accessId) &&
+        data.accessId.size() >= 2 &&
+        data.accessId == pathAccessId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        isValidId(data.inviteId) &&
+        isValidId(data.ownerUid) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 128 &&
+        (!('staffName' in data) || (data.staffName is string && data.staffName.size() <= 120)) &&
+        (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 160)) &&
+        data.role in ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'] &&
+        data.status in ['PENDING', 'ACTIVE', 'REVOKED'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStaffAccountDoc(data, pathBizId, pathStaffId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'ownerUid', 'updatedByUid',
+          'username', 'name', 'role', 'pinHash', 'salt',
+          'isActive', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'businessId', 'ownerUid', 'updatedByUid',
+          'username', 'name', 'nepaliName', 'role', 'pinHash', 'salt',
+          'isActive', 'email', 'phone', 'mustChangePin', 'lastPinChangedAt',
+          'linkedFirebaseUid', 'lastLogin', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id.size() >= 2 &&
+        data.id == pathStaffId &&
+        isValidId(data.businessId) &&
+        data.businessId.size() >= 2 &&
+        data.businessId == pathBizId &&
+        isValidId(data.ownerUid) &&
+        isValidId(data.updatedByUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        (!('nepaliName' in data) || (data.nepaliName is string && data.nepaliName.size() <= 120)) &&
+        data.role in ['SUPER_ADMIN', 'OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'HOUSEKEEPING', 'ACCOUNTANT', 'INVENTORY_STAFF', 'STAFF'] &&
+        data.pinHash is string && data.pinHash.size() <= 128 &&
+        data.salt is string && data.salt.size() >= 1 && data.salt.size() <= 64 &&
+        data.isActive is bool &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 128)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('mustChangePin' in data) || data.mustChangePin is bool) &&
+        (!('lastPinChangedAt' in data) || (data.lastPinChangedAt is string && data.lastPinChangedAt.size() <= 64)) &&
+        (!('linkedFirebaseUid' in data) || (data.linkedFirebaseUid is string && data.linkedFirebaseUid.size() <= 128)) &&
+        (!('lastLogin' in data) || (data.lastLogin is string && data.lastLogin.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function canReadSyncChannel(businessId, channelId) {
       return isOwnerOrMaster(businessId) || (
         channelId == 'orders_live' && hasMemberRole(businessId, ['ADMIN', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN', 'RECEPTIONIST', 'STAFF'])
@@ -445,6 +519,30 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // /ownerWorkspaces/{ownerUid} - Single-Business-Per-Account Claim Lock
+    // -------------------------------------------------------------------------
+    match /ownerWorkspaces/{ownerUid} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(ownerUid) && (
+        isMasterOwnerEmail() ||
+        request.auth.uid == ownerUid
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && (
+        isMasterOwnerEmail() ||
+        resource.data.ownerUid == request.auth.uid
+      );
+      allow create: if isSignedIn() && isVerifiedUser() && isValidId(ownerUid) &&
+        request.auth.uid == ownerUid &&
+        isValidOwnerWorkspaceClaim(incoming(), ownerUid) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().ownerEmail == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        existsAfter(/databases/$(database)/documents/businesses/$(incoming().businessId)) &&
+        getAfter(/databases/$(database)/documents/businesses/$(incoming().businessId)).data.ownerUid == request.auth.uid;
+      allow update: if false;
+      allow delete: if isMasterOwnerEmail();
+    }
+
+    // -------------------------------------------------------------------------
     // /businesses/{businessId} - Multi-Tenant Enterprise Workspaces
     // -------------------------------------------------------------------------
     match /businesses/{businessId} {
@@ -462,22 +560,39 @@ service cloud.firestore {
         incoming().ownerUid == request.auth.uid &&
         incoming().ownerEmail == request.auth.token.email &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time && (
+          isMasterOwnerEmail() ||
+          (
+            !exists(/databases/$(database)/documents/ownerWorkspaces/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/ownerWorkspaces/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/ownerWorkspaces/$(request.auth.uid)).data.businessId == businessId
+          )
+        );
       allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) &&
         isValidBusiness(incoming(), businessId) &&
         incoming().businessId == existing().businessId &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().ownerEmail == existing().ownerEmail &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly([
-          'businessName', 'nepaliBusinessName', 'tagline', 'businessType',
-          'status', 'enabledModules', 'currencySymbol', 'enableVat',
-          'vatRatePercent', 'enableServiceCharge', 'serviceChargePercent',
-          'fonepayMerchantName', 'ownerControlLocked', 'updatedAt'
-        ]) && (
-          isMasterOwnerEmail() ||
-          existing().ownerUid == request.auth.uid
+        incoming().updatedAt == request.time && (
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'businessName', 'nepaliBusinessName', 'tagline', 'businessType',
+              'status', 'enabledModules', 'currencySymbol', 'enableVat',
+              'vatRatePercent', 'enableServiceCharge', 'serviceChargePercent',
+              'fonepayMerchantName', 'ownerControlLocked', 'updatedAt'
+            ]) && (
+              isMasterOwnerEmail() ||
+              existing().ownerUid == request.auth.uid
+            )
+          ) || (
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'currencySymbol', 'enableVat', 'vatRatePercent',
+              'enableServiceCharge', 'serviceChargePercent',
+              'fonepayMerchantName', 'updatedAt'
+            ])
+          )
         );
       allow delete: if isMasterOwnerEmail() || (isVerifiedUser() && resource != null && existing().ownerUid == request.auth.uid);
 
@@ -504,8 +619,7 @@ service cloud.firestore {
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time && (
             isOwnerOrMaster(businessId) ||
-            hasMemberRole(businessId, ['ADMIN']) ||
-            (hasMemberRole(businessId, ['MANAGER']) && isSubordinateStaffRole(incoming().role))
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
           );
         allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
           isValidInvite(incoming(), businessId, inviteId) &&
@@ -516,12 +630,7 @@ service cloud.firestore {
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time && (
             isOwnerOrMaster(businessId) ||
-            hasMemberRole(businessId, ['ADMIN']) ||
-            (
-              hasMemberRole(businessId, ['MANAGER']) &&
-              isSubordinateStaffRole(existing().role) &&
-              isSubordinateStaffRole(incoming().role)
-            ) ||
+            hasMemberRole(businessId, ['ADMIN', 'MANAGER']) ||
             (
               existing().email == request.auth.token.email &&
               existing().status == 'PENDING' &&
@@ -529,8 +638,10 @@ service cloud.firestore {
               incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
             )
           );
-        allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) &&
-          isOwnerOrMaster(businessId);
+        allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(inviteId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
+        );
       }
 
       // -----------------------------------------------------------------------
@@ -582,18 +693,79 @@ service cloud.firestore {
               (incoming().role != 'OWNER' || isMasterOwnerEmail() || request.auth.uid == existing().ownerUid)
             ) ||
             (
-              hasMemberRole(businessId, ['ADMIN']) &&
+              hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
               existing().role != 'OWNER' &&
+              existing().uid != existing().ownerUid &&
               incoming().role != 'OWNER'
-            ) ||
-            (
-              hasMemberRole(businessId, ['MANAGER']) &&
-              isSubordinateStaffRole(existing().role) &&
-              isSubordinateStaffRole(incoming().role)
             )
           );
         allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(memberUid) &&
-          isOwnerOrMaster(businessId);
+          resource != null && (
+            isOwnerOrMaster(businessId) ||
+            (
+              hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+              existing().role != 'OWNER' &&
+              existing().uid != existing().ownerUid &&
+              existing().email != 'samjhamnamalla22444@gmail.com'
+            )
+          );
+      }
+
+      // -----------------------------------------------------------------------
+      // /businesses/{businessId}/staffAccounts/{staffId} - Synced Staff & PINs
+      // -----------------------------------------------------------------------
+      match /staffAccounts/{staffId} {
+        allow get: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(staffId) && (
+          isOwnerOrMaster(businessId) ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
+        );
+        allow list: if isSignedIn() && isVerifiedUser() && (
+          isMasterOwnerEmail() ||
+          resource.data.ownerUid == request.auth.uid ||
+          hasMemberRole(businessId, ['ADMIN', 'MANAGER'])
+        );
+        allow create: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(staffId) &&
+          isValidStaffAccountDoc(incoming(), businessId, staffId) &&
+          businessExists(businessId) &&
+          incoming().ownerUid == businessData(businessId).ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time && (
+            isOwnerOrMaster(businessId) ||
+            (
+              hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+              incoming().role != 'SUPER_ADMIN'
+            )
+          );
+        allow update: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(staffId) &&
+          isValidStaffAccountDoc(incoming(), businessId, staffId) &&
+          incoming().id == existing().id &&
+          incoming().businessId == existing().businessId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().updatedByUid == request.auth.uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'username', 'name', 'nepaliName', 'role', 'pinHash', 'salt',
+            'isActive', 'email', 'phone', 'mustChangePin', 'lastPinChangedAt',
+            'linkedFirebaseUid', 'lastLogin', 'updatedByUid', 'updatedAt'
+          ]) && (
+            isOwnerOrMaster(businessId) ||
+            (
+              hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+              existing().role != 'SUPER_ADMIN' &&
+              incoming().role != 'SUPER_ADMIN' &&
+              (incoming().role == existing().role || incoming().role != 'OWNER')
+            )
+          );
+        allow delete: if isSignedIn() && isVerifiedUser() && isValidId(businessId) && isValidId(staffId) &&
+          resource != null && (
+            isOwnerOrMaster(businessId) ||
+            (
+              hasMemberRole(businessId, ['ADMIN', 'MANAGER']) &&
+              existing().role != 'SUPER_ADMIN'
+            )
+          );
       }
 
       // -----------------------------------------------------------------------
@@ -823,6 +995,92 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isMasterOwnerEmail();
       }
+    }
+
+    // -------------------------------------------------------------------------
+    // /workspaceAccess/{accessId} - Email-Scoped Cross-Device Workspace Discovery
+    // -------------------------------------------------------------------------
+    match /workspaceAccess/{accessId} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(accessId) && (
+        isMasterOwnerEmail() ||
+        (resource != null && (
+          existing().ownerUid == request.auth.uid ||
+          existing().email == request.auth.token.email ||
+          hasMemberRole(existing().businessId, ['ADMIN', 'MANAGER'])
+        ))
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && (
+        isMasterOwnerEmail() ||
+        resource.data.ownerUid == request.auth.uid ||
+        resource.data.email == request.auth.token.email
+      );
+      allow create: if isSignedIn() && isVerifiedUser() && isValidId(accessId) &&
+        isValidWorkspaceAccess(incoming(), accessId) &&
+        businessExists(incoming().businessId) &&
+        incoming().ownerUid == businessData(incoming().businessId).ownerUid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time && (
+          isOwnerOrMaster(incoming().businessId) ||
+          hasMemberRole(incoming().businessId, ['ADMIN', 'MANAGER'])
+        );
+      allow update: if isSignedIn() && isVerifiedUser() && isValidId(accessId) &&
+        isValidWorkspaceAccess(incoming(), accessId) &&
+        incoming().accessId == existing().accessId &&
+        incoming().businessId == existing().businessId &&
+        incoming().inviteId == existing().inviteId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isOwnerOrMaster(existing().businessId) ||
+          hasMemberRole(existing().businessId, ['ADMIN', 'MANAGER']) ||
+          (
+            existing().email == request.auth.token.email &&
+            existing().status == 'PENDING' &&
+            incoming().status == 'ACTIVE' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if isSignedIn() && isVerifiedUser() && isValidId(accessId) &&
+        resource != null && (
+          isOwnerOrMaster(existing().businessId) ||
+          hasMemberRole(existing().businessId, ['ADMIN', 'MANAGER'])
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Group Self-Discovery Rules (Strictly Email/UID-Scoped)
+    // -------------------------------------------------------------------------
+    match /{path=**}/invites/{inviteId} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(inviteId) && (
+        isMasterOwnerEmail() ||
+        (resource != null && (
+          existing().email == request.auth.token.email ||
+          existing().ownerUid == request.auth.uid
+        ))
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && (
+        isMasterOwnerEmail() ||
+        resource.data.email == request.auth.token.email ||
+        resource.data.ownerUid == request.auth.uid
+      );
+    }
+
+    match /{path=**}/members/{memberUid} {
+      allow get: if isSignedIn() && isVerifiedUser() && isValidId(memberUid) && (
+        isMasterOwnerEmail() ||
+        request.auth.uid == memberUid ||
+        (resource != null && (
+          existing().email == request.auth.token.email ||
+          existing().ownerUid == request.auth.uid
+        ))
+      );
+      allow list: if isSignedIn() && isVerifiedUser() && (
+        isMasterOwnerEmail() ||
+        resource.data.uid == request.auth.uid ||
+        resource.data.email == request.auth.token.email ||
+        resource.data.ownerUid == request.auth.uid
+      );
     }
   }
 }

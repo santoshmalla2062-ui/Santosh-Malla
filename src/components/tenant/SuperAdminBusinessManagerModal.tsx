@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { AppModule, BusinessStatus, BusinessTenant, BusinessType, StaffRole, SubscriptionPlan, SubscriptionInvoice, TenantSubscription } from '../../types';
 import { ALL_APP_MODULES } from '../../services/tenantStorage';
-import { MASTER_OWNER_EMAIL } from '../../services/cloudSyncService';
+import { isMasterOwnerEmail } from '../../services/cloudSyncService';
 import { 
   getSubscriptionPlans, 
   saveSubscriptionPlans, 
@@ -223,7 +223,7 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base font-bold text-white">App Creator Control Hub & SaaS Sync</h2>
                 <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-400 text-slate-950">
-                  {isAppCreator ? `Verified Creator (${MASTER_OWNER_EMAIL})` : 'Super Admin'}
+                  {isAppCreator ? 'Verified Super Admin' : 'Super Admin'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -343,13 +343,13 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
                   <div>
                     <p className="font-bold text-slate-900">
                       {cloudSyncStatus === 'connected' && isAppCreator
-                        ? `App Creator Cloud Sync Active (${cloudUserEmail})`
-                        : 'App Creator Cloud Sync Not Connected'}
+                        ? 'Super Admin Cloud Sync Active'
+                        : 'Super Admin Cloud Sync Not Connected'}
                     </p>
                     <p className="text-[11px] text-slate-600">
                       {cloudSyncStatus === 'connected' && isAppCreator
                         ? 'Pull all Firestore client businesses, suspend unpaid branches remotely, or edit active modules.'
-                        : `Sign in with ${MASTER_OWNER_EMAIL} to sync and govern client workspaces across cloud devices.`}
+                        : 'Sign in with your verified Super Admin Google account to sync and govern client workspaces across cloud devices.'}
                     </p>
                   </div>
                 </div>
@@ -493,7 +493,9 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
 
                           <td className="py-2.5 px-3 text-[11px] text-slate-600">
                             <p className="font-semibold text-slate-800">{b.ownerName}</p>
-                            <p className="text-slate-400">{b.phone || b.email}</p>
+                            <p className="text-slate-400">
+                              {b.phone || (isMasterOwnerEmail(b.email) ? 'Protected' : b.email)}
+                            </p>
                           </td>
 
                           <td className="py-2.5 px-3">
@@ -780,7 +782,7 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
               <div className="p-4 rounded-2xl bg-slate-900 text-white space-y-1">
                 <h3 className="text-sm font-bold flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-amber-400" />
-                  <span>App Creator Operations Playbook ({MASTER_OWNER_EMAIL})</span>
+                  <span>App Creator Operations Playbook</span>
                 </h3>
                 <p className="text-xs text-slate-300">
                   Master Owner Sync अब पूर्ण रूपमा App Creator को लागि बनाइएको छ। तलको ५ चरणबाट सबै Client Businesses लाई सुरक्षित रूपमा manage गर्न सकिन्छ:
@@ -792,7 +794,7 @@ export const SuperAdminBusinessManagerModal: React.FC<SuperAdminBusinessManagerM
                   <span className="text-[10px] font-black uppercase text-amber-700">Step 1 · Creator Login</span>
                   <h4 className="font-bold text-slate-900">1. Sign in with Verified Creator Google</h4>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    <strong>{MASTER_OWNER_EMAIL}</strong> बाट Google Connect गर्दा Header मा <strong>App Creator Sync</strong> र भूमिका <strong>SUPER_ADMIN</strong> खुल्छ। यसले Firestore बाट सबै client businesses तान्न र manage गर्न अनुमति दिन्छ।
+                    प्रमाणित <strong>Super Admin Google</strong> खाताबाट Connect गर्दा Header मा <strong>App Creator Sync</strong> र भूमिका <strong>SUPER_ADMIN</strong> खुल्छ। यसले Firestore बाट सबै client businesses तान्न र manage गर्न अनुमति दिन्छ।
                   </p>
                 </div>
 

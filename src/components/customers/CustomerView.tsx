@@ -19,6 +19,7 @@ import { BusinessSettings, Customer, KhataTransaction, Session } from '../../typ
 import { Language, TRANSLATIONS } from '../../utils/translations';
 import { exportCustomerKhataCSV } from '../../services/storage';
 import { hasPermission, validateCustomerInput } from '../../services/security';
+import { NumberInput } from '../common/NumberInput';
 
 interface CustomerViewProps {
   customers: Customer[];
@@ -407,14 +408,12 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                   {lang === 'ne' ? 'प्राप्त रकम (Amount Received) *' : 'Amount Received *'}
                 </label>
                 <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="any"
-                    min="1"
+                  <NumberInput
+                    min={1}
                     max={collectTarget.creditBalance}
                     required
                     value={collectAmount}
-                    onChange={(e) => setCollectAmount(Number(e.target.value))}
+                    onValueChange={(val) => setCollectAmount(val)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-black text-base text-emerald-900"
                   />
                   <button
@@ -521,13 +520,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 <label className="block font-bold text-slate-700 mb-1">
                   {lang === 'ne' ? 'उधारो रकम (Amount) *' : 'Credit Amount *'}
                 </label>
-                <input
-                  type="number"
-                  step="any"
-                  min="1"
+                <NumberInput
+                  min={1}
                   required
                   value={creditAmount}
-                  onChange={(e) => setCreditAmount(Number(e.target.value))}
+                  onValueChange={(val) => setCreditAmount(val)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-black text-base text-amber-900"
                 />
               </div>
@@ -761,11 +758,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 <label className="block font-bold text-slate-700 mb-1">
                   {lang === 'ne' ? 'सुरुवाती पुरानो बाँकी उधारो (रू.):' : 'Initial Due Balance (Rs.):'}
                 </label>
-                <input
-                  type="number"
-                  min="0"
+                <NumberInput
+                  min={0}
                   value={newCustInitialCredit}
-                  onChange={(e) => setNewCustInitialCredit(Number(e.target.value))}
+                  onValueChange={(val) => setNewCustInitialCredit(val)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono-num font-bold text-slate-800"
                 />
               </div>

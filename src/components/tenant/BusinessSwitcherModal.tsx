@@ -29,6 +29,8 @@ interface BusinessSwitcherModalProps {
   onOpenSuperAdmin?: () => void;
   currentRole?: StaffRole;
   isAppCreator?: boolean;
+  canCreateBusiness?: boolean;
+  createBusinessBlockedReason?: string;
 }
 
 export const BusinessSwitcherModal: React.FC<BusinessSwitcherModalProps> = ({
@@ -41,7 +43,9 @@ export const BusinessSwitcherModal: React.FC<BusinessSwitcherModalProps> = ({
   onOpenRegister,
   onOpenSuperAdmin,
   currentRole,
-  isAppCreator = false
+  isAppCreator = false,
+  canCreateBusiness = false,
+  createBusinessBlockedReason
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -107,16 +111,26 @@ export const BusinessSwitcherModal: React.FC<BusinessSwitcherModalProps> = ({
               className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-slate-50/50"
             />
           </div>
-          <button
-            onClick={() => {
-              onClose();
-              onOpenRegister();
-            }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors whitespace-nowrap"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Create Business</span>
-          </button>
+          {(canCreateBusiness || isAppCreator || currentRole === 'SUPER_ADMIN') ? (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenRegister();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors whitespace-nowrap"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Create Business</span>
+            </button>
+          ) : (
+            <span
+              title={createBusinessBlockedReason || 'One business workspace allowed per account'}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-xl border border-slate-200 whitespace-nowrap"
+            >
+              <Lock className="h-3.5 w-3.5 text-slate-400" />
+              <span>1 Business / Account</span>
+            </span>
+          )}
         </div>
 
         {/* Businesses List */}
@@ -231,7 +245,7 @@ export const BusinessSwitcherModal: React.FC<BusinessSwitcherModalProps> = ({
                           </button>
                           {onDeleteBusiness &&
                             businesses.length > 1 &&
-                            (currentRole === 'OWNER' || currentRole === 'ADMIN' || currentRole === 'SUPER_ADMIN') &&
+                            (currentRole === 'SUPER_ADMIN' || isAppCreator) &&
                             (confirmDeleteId === business.businessId ? (
                               <button
                                 type="button"
