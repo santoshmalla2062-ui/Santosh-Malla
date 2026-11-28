@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { formatReceiptNepaliDate, getBikramSambatDate } from '../utils/nepaliCalendar';
-import { buildReceiptPaymentRows, formatPlainTextReceipt } from '../utils/receiptFormatter';
+import {
+  buildReceiptPaymentRows,
+  buildWhatsAppBillUrl,
+  formatPlainTextReceipt,
+  normalizeWhatsAppPhone
+} from '../utils/receiptFormatter';
 import { BusinessSettings, Order } from '../types';
 
 const sampleSettings: BusinessSettings = {
@@ -168,5 +173,33 @@ test('Receipt Formatting: Payment rows distinguish Cash Change, Fonepay Ref, Kha
     assert.equal(devanagariRegex.test(row.amountText), false);
   }
 });
+
+test('Receipt Formatting: WhatsApp bill share normalizes Nepali numbers and encodes full bill summary', () => {
+  assert.equal(normalizeWhatsAppPhone('9841234567'), '9779841234567');
+  assert.equal(normalizeWhatsAppPhone('+977 980-1234567'), '9779801234567');
+  assert.equal(normalizeWhatsAppPhone(''), '');
+
+  const waUrl = buildWhatsAppBillUrl({
+    order: { ...baseOrder, customerPhone: '9841234567', customerName: 'Ramesh' },
+    settings: sampleSettings,
+    billType: 'tax_invoice',
+    displayDateStr: '2083-07-23 12:18 PM'
+  });
+
+  assert.ok(waUrl.startsWith('https://wa.me/9779841234567?text='));
+  const decodedMsg = decodeURIComponent(waUrl.split('?text=')[1]);
+  assert.ok(decodedMsg.includes('*Naulo Hospitality*'));
+  assert.ok(decodedMsg.includes('TAX INVOICE'));
+  assert.ok(decodedMsg.includes('*GRAND TOTAL: Rs.621.50*'));
+
+  const genericWaUrl = buildWhatsAppBillUrl({
+    order: { ...baseOrder, customerPhone: undefined },
+    settings: sampleSettings,
+    billType: 'estimate',
+    displayDateStr: '2083-07-23 12:18 PM'
+  });
+  assert.ok(genericWaUrl.startsWith('https://wa.me/?text='));
+});
+
 
 

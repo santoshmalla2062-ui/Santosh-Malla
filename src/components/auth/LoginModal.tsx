@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Session, StaffInvitation, StaffRole, StaffUser } from '../../types';
 import { hashPinWithSalt, isKnownWeakPin, saveSession, validateProductionPin } from '../../services/security';
-import { getVisibleDemoPinRoles, isMasterOwnerEmail } from '../../services/cloudSyncService';
+import { isMasterOwnerEmail } from '../../services/cloudSyncService';
 import { Language } from '../../utils/translations';
 import { PWAInstallButton } from '../common/PWAInstallButton';
 
@@ -151,7 +151,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-  const [showDemoPins, setShowDemoPins] = useState(false);
 
   // Mandatory PIN rotation state
   const [pendingRotationStaff, setPendingRotationStaff] = useState<StaffUser | null>(null);
@@ -210,7 +209,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       activeStaffUsers[0] ||
       staffUsers[0];
 
-  const visibleDemoPinRoles = getVisibleDemoPinRoles(ownerControlLocked);
   const userAgentStr = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
   const isSocialInAppWebView = /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(userAgentStr);
   const isAndroidApkWebView = !isSocialInAppWebView && /;\s*wv\)/i.test(userAgentStr);
@@ -1331,48 +1329,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     </button>
                   ))}
                 </div>
-
-                {/* Unprivileged Demo PINs — strictly hidden when Owner Control Lock is ON */}
-                {visibleDemoPinRoles.length > 0 && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowDemoPins((p) => !p)}
-                      className="text-[11px] text-slate-500 hover:text-orange-600 flex items-center gap-1 underline"
-                    >
-                      <KeyRound className="h-3 w-3" />
-                      <span>
-                        {showDemoPins
-                          ? lang === 'ne' ? 'स्टाफ सर्टकट लुकाउनुहोस्' : 'Hide Staff Shortcuts'
-                          : lang === 'ne' ? 'स्टाफ परीक्षण पिनहरू हेर्नुहोस्' : 'View Staff Demo PINs'}
-                      </span>
-                    </button>
-                    {showDemoPins && (
-                      <div className="mt-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200 text-[10px] space-y-1">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 font-mono-num">
-                          {visibleDemoPinRoles.map((demo) => (
-                            <button
-                              key={demo.role}
-                              type="button"
-                              onClick={() => {
-                                const found = staffUsers.find(
-                                  (s) => s.role === demo.role && s.isActive !== false
-                                );
-                                if (found) setSelectedStaffId(found.id);
-                                setPin(demo.pin);
-                                setErrorMsg('');
-                              }}
-                              className="px-2 py-1 bg-white hover:bg-orange-50 border border-slate-200 rounded-lg text-left flex items-center justify-between"
-                            >
-                              <span className="font-semibold text-slate-800">{demo.label}:</span>
-                              <span className="font-bold text-orange-600">{demo.pin}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
 
               <button

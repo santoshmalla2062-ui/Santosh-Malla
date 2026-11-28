@@ -33,6 +33,7 @@ import {
 import { createStaffAccount } from './security';
 import { createCleanChartOfAccounts, ensureDefaultChartAccounts } from './accounting';
 import { isMasterOwnerEmail, redactProtectedEmail } from './cloudSyncService';
+import { sanitizeBusinessLogoUrl } from '../utils/imageUtils';
 
 export const BUSINESSES_REGISTRY_KEY = 'hb_businesses_registry_v1';
 export const MEMBERSHIPS_REGISTRY_KEY = 'hb_memberships_registry_v1';
@@ -91,86 +92,28 @@ export const DEFAULT_MODULES_BY_TYPE: Record<BusinessType, AppModule[]> = {
 export const INITIAL_BUSINESS_TENANTS: BusinessTenant[] = [
   {
     businessId: 'biz-himalayan-breeze',
-    businessName: 'Himalayan Breeze Cafe & Resort',
-    nepaliBusinessName: 'हिमालयन ब्रीज क्याफे तथा रिसोर्ट',
-    tagline: 'Premier Lakeside Boutique Hospitality & Fine Dining',
+    businessName: 'CAFE HOST',
+    nepaliBusinessName: 'CAFE HOST',
+    tagline: 'Hospitality & POS Management',
     businessType: 'CAFE_RESTAURANT_RESORT',
     ownerId: 'staff-admin-sys',
-    ownerName: 'Owner / General Manager',
-    logo: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=120&q=80',
-    phone: '+977 61 465890',
-    email: 'info@himalayanbreeze.com.np',
-    address: 'Lakeside-6, Pokhara, Gandaki, Nepal',
-    panVatNumber: '601928374',
-    status: 'ACTIVE',
-    enabledModules: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
-    currencySymbol: 'Rs.',
-    environment: 'demo',
-    templateType: 'starter',
-    createdAt: '2026-09-01',
-    updatedAt: '2026-10-02'
-  },
-  {
-    businessId: 'biz-annapurna-coffee',
-    businessName: 'Annapurna Specialty Coffee & Bakery',
-    nepaliBusinessName: 'अन्नपूर्ण स्पेसियालिटी कफी तथा बेकरी',
-    tagline: 'Artisanal Himalayan Single-Origin Brews & Fresh Pastries',
-    businessType: 'CAFE',
-    ownerId: 'staff-bikash-coffee',
-    ownerName: 'Bikash Gurung',
-    logo: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=120&q=80',
-    phone: '+977 61 520112',
-    email: 'hello@annapurnacoffee.np',
-    address: 'Middle Path, Lakeside, Pokhara, Nepal',
-    panVatNumber: '302918234',
-    status: 'ACTIVE',
-    enabledModules: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
-    currencySymbol: 'Rs.',
-    createdAt: '2026-09-15',
-    updatedAt: '2026-10-01'
-  },
-  {
-    businessId: 'biz-phewa-dining',
-    businessName: 'Phewa Lakeside Fine Dine Restaurant',
-    nepaliBusinessName: 'फेवा लेकसाइड फाइन डाइन रेस्टुरेन्ट',
-    tagline: 'Authentic Thakali, Tandoori & Continental Gourmet Delights',
-    businessType: 'RESTAURANT',
-    ownerId: 'staff-pooja-dine',
-    ownerName: 'Pooja Shrestha',
-    logo: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=120&q=80',
-    phone: '+977 61 462319',
-    email: 'contact@phewalakesidedine.com',
-    address: 'Barahi Chowk, Baidam, Pokhara, Nepal',
-    panVatNumber: '501829402',
-    status: 'ACTIVE',
-    enabledModules: ['pos', 'billing', 'tables_rooms', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings'],
-    currencySymbol: 'Rs.',
-    createdAt: '2026-09-20',
-    updatedAt: '2026-10-02'
-  },
-  {
-    businessId: 'biz-mugu-resort',
-    businessName: 'Mugu Luxury Mountain Resort',
-    nepaliBusinessName: 'मुगु लक्जरी माउन्टेन रिसोर्ट',
-    tagline: 'Rara Lake Alpine Sanctuary & Mountain Hospitality',
-    businessType: 'RESORT',
-    ownerId: 'staff-rara-owner',
-    ownerName: 'Pasang Sherpa',
-    logo: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=120&q=80',
-    phone: '+977 87 520011',
-    email: 'contact@muguresort.com.np',
-    address: 'Rara National Park Buffer Zone, Mugu, Karnali, Nepal',
-    panVatNumber: '702819401',
+    ownerName: 'Owner',
+    logo: undefined,
+    phone: '',
+    email: '',
+    address: '',
+    panVatNumber: '',
     status: 'ACTIVE',
     enabledModules: ['pos', 'billing', 'tables_rooms', 'resort', 'kds', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
     currencySymbol: 'Rs.',
-    createdAt: '2026-09-25',
-    updatedAt: '2026-10-03'
+    environment: 'production',
+    templateType: 'clean_slate',
+    createdAt: '2026-09-01',
+    updatedAt: '2026-10-02'
   }
 ];
 
 export const INITIAL_MEMBERSHIPS: UserBusinessMembership[] = [
-  // Super Admin has access across all businesses
   {
     id: 'mem-super-1',
     userId: 'staff-super-admin',
@@ -179,31 +122,6 @@ export const INITIAL_MEMBERSHIPS: UserBusinessMembership[] = [
     status: 'ACTIVE',
     createdAt: '2026-09-01'
   },
-  {
-    id: 'mem-super-2',
-    userId: 'staff-super-admin',
-    businessId: 'biz-annapurna-coffee',
-    role: 'SUPER_ADMIN',
-    status: 'ACTIVE',
-    createdAt: '2026-09-01'
-  },
-  {
-    id: 'mem-super-3',
-    userId: 'staff-super-admin',
-    businessId: 'biz-phewa-dining',
-    role: 'SUPER_ADMIN',
-    status: 'ACTIVE',
-    createdAt: '2026-09-01'
-  },
-  {
-    id: 'mem-super-4',
-    userId: 'staff-super-admin',
-    businessId: 'biz-mugu-resort',
-    role: 'SUPER_ADMIN',
-    status: 'ACTIVE',
-    createdAt: '2026-09-01'
-  },
-  // Default Admin User on Himalayan Breeze
   {
     id: 'mem-hb-admin',
     userId: 'staff-admin-sys',
@@ -685,23 +603,31 @@ export function loadTenantAppState(businessId: string): AppState {
     }
   }
 
-  // 3. Generate initial template for this business
+  // 3. Generate initial state for this business (starter only when explicitly requested)
   const business = getRegisteredBusinesses().find(b => b.businessId === businessId);
-  const starter = createStarterStateForBusinessType(business || {
-    businessId,
-    businessName: 'Business ' + businessId,
-    businessType: 'CAFE',
-    ownerId: 'owner',
-    ownerName: 'Owner',
-    phone: '',
-    email: '',
-    address: '',
-    status: 'ACTIVE',
-    enabledModules: ['pos', 'tables_rooms', 'inventory', 'customers', 'day_closing', 'reports', 'settings', 'business_admin'],
-    currencySymbol: 'Rs.',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  });
+  let starter: AppState;
+  if (business?.templateType === 'starter') {
+    starter = createStarterStateForBusinessType(business);
+  } else {
+    const cleanSettings: BusinessSettings = {
+      ...DEFAULT_SETTINGS,
+      businessId,
+      businessName: business?.businessName || DEFAULT_SETTINGS.businessName,
+      nepaliBusinessName: business?.nepaliBusinessName || business?.businessName || DEFAULT_SETTINGS.nepaliBusinessName,
+      tagline: business?.tagline || DEFAULT_SETTINGS.tagline,
+      address: business?.address || '',
+      phone: business?.phone || '',
+      email: business?.email || '',
+      panVatNumber: business?.panVatNumber || '',
+      currencySymbol: business?.currencySymbol || 'Rs.',
+      fonepayMerchantName: business?.businessName || ''
+    };
+    starter = {
+      ...getCleanStarterState(cleanSettings),
+      businessId,
+      accounts: createCleanChartOfAccounts(businessId)
+    };
+  }
 
   const defaultedStarter = ensureTenantDefaults(starter, businessId);
   try {
@@ -906,22 +832,22 @@ export function registerNewBusiness(input: {
     ? input.enabledModules 
     : DEFAULT_MODULES_BY_TYPE[input.businessType] || ALL_APP_MODULES;
 
-  const templateType = input.templateType || 'starter';
+  const templateType = input.templateType || 'clean_slate';
   const environment = input.environment || 'production';
 
   const newBusiness: BusinessTenant = {
     businessId,
     businessName: input.businessName.trim(),
     nepaliBusinessName: input.nepaliBusinessName?.trim(),
-    tagline: input.tagline?.trim() || `${input.businessName} - Quality Hospitality & Service`,
+    tagline: input.tagline?.trim() || `${input.businessName} - Hospitality & POS`,
     businessType: input.businessType,
     ownerId: input.ownerId,
     ownerName: input.ownerName,
-    logo: input.logo || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=120&q=80',
+    logo: sanitizeBusinessLogoUrl(input.logo),
     phone: input.phone.trim(),
     email: input.email.trim(),
     address: input.address.trim(),
-    panVatNumber: input.panVatNumber?.trim() || '600000000',
+    panVatNumber: input.panVatNumber?.trim() || '',
     status: 'ACTIVE',
     enabledModules,
     currencySymbol: 'Rs.',
@@ -1057,11 +983,11 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
     businessId: business.businessId,
     businessName: business.businessName,
     nepaliBusinessName: business.nepaliBusinessName || business.businessName,
-    tagline: business.tagline || 'Excellence in Service',
+    tagline: business.tagline || 'Hospitality & POS Management',
     address: business.address,
     phone: business.phone,
     email: business.email,
-    panVatNumber: business.panVatNumber || '600000000',
+    panVatNumber: business.panVatNumber || '',
     currencySymbol: business.currencySymbol || 'Rs.',
     enableVat: true,
     vatRatePercent: 13,
@@ -1320,19 +1246,7 @@ export function createStarterStateForBusinessType(business: BusinessTenant): App
     expenses: [],
     dayClosings: [],
     staffUsers: INITIAL_STAFF_USERS,
-    auditLogs: [
-      {
-        id: 'audit-' + business.businessId + '-init',
-        businessId: business.businessId,
-        staffId: business.ownerId,
-        staffName: business.ownerName,
-        role: 'OWNER',
-        action: 'BUSINESS_INITIALIZED',
-        details: `Workspace initialized for ${business.businessName} with ${business.businessType} profile and isolated database store.`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        severity: 'INFO'
-      }
-    ],
+    auditLogs: [],
     settings: businessSettings,
     accounts: createCleanChartOfAccounts(business.businessId),
     roomTypes: hasResort ? INITIAL_ROOM_TYPES : [],

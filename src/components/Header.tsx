@@ -12,7 +12,6 @@ import {
   Bell,
   LogOut,
   ArrowRightLeft,
-  Cloud,
   Check
 } from 'lucide-react';
 import { BusinessSettings, BusinessTenant, Session, StaffRole } from '../types';
@@ -31,7 +30,6 @@ interface HeaderProps {
   onOpenLogin: () => void;
   onLogout: () => void;
   onOpenAuditLogs?: () => void;
-  onOpenSyncDetails?: () => void;
   onFlushQueue?: () => void;
   lowStockCount: number;
   activeOrdersCount: number;
@@ -65,7 +63,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLogin,
   onLogout,
   onOpenAuditLogs,
-  onOpenSyncDetails,
   onToggleSound,
   onToggleSidebar,
   onOpenQuickActions,
@@ -398,20 +395,6 @@ export const Header: React.FC<HeaderProps> = ({
                         >
                           <Sliders className="h-3.5 w-3.5 text-purple-600" />
                           <span>{lang === 'ne' ? 'क्रिएटर हब' : 'App Creator Hub'}</span>
-                        </button>
-                      )}
-
-                      {onOpenSyncDetails && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowAccountMenu(false);
-                            onOpenSyncDetails();
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-700 font-medium transition-colors"
-                        >
-                          <Cloud className="h-3.5 w-3.5 text-emerald-600" />
-                          <span>{lang === 'ne' ? 'क्लाउड सिङ्क विवरण' : 'Cloud Sync Status'}</span>
                         </button>
                       )}
 

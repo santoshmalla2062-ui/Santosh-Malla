@@ -41,7 +41,6 @@ interface SyncResilienceTestModalProps {
   onClose: () => void;
   activeBusinessId: string;
   appState: AppState;
-  onApplySyncOrder?: (order: Order) => void;
 }
 
 interface TestResult {
@@ -55,9 +54,7 @@ interface TestResult {
 export const SyncResilienceTestModal: React.FC<SyncResilienceTestModalProps> = ({
   isOpen,
   onClose,
-  activeBusinessId,
-  appState,
-  onApplySyncOrder
+  activeBusinessId
 }) => {
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [recentEvents, setRecentEvents] = useState<SyncEvent[]>([]);
@@ -596,20 +593,6 @@ export const SyncResilienceTestModal: React.FC<SyncResilienceTestModalProps> = (
                 <Layers className="h-4 w-4 text-blue-600" />
                 <span>Offline Draft Queue ({offlineQueueItems.length} items)</span>
               </h3>
-              {offlineQueueItems.length > 0 && !isOffline && (
-                <button
-                  onClick={() => {
-                    flushOfflineQueue(activeBusinessId, draft => {
-                      if (onApplySyncOrder) onApplySyncOrder(draft);
-                      return { success: true };
-                    });
-                    setOfflineQueueItems(getOfflineQueue(activeBusinessId));
-                  }}
-                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors"
-                >
-                  Flush & Commit Drafts
-                </button>
-              )}
             </div>
 
             {offlineQueueItems.length === 0 ? (

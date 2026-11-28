@@ -18,7 +18,6 @@ import {
   Check, 
   AlertTriangle,
   History,
-  Wifi,
   Sparkles,
   LayoutGrid,
   QrCode
@@ -37,7 +36,6 @@ interface QuickActionsModalProps {
   currentRole?: StaffRole;
   onNavigateToTab: (tab: ActiveTab, subAction?: string) => void;
   onOpenAuditLogs: () => void;
-  onOpenSyncDetails: () => void;
   onOpenMobileQR?: () => void;
 }
 
@@ -61,7 +59,6 @@ export const QuickActionsModal: React.FC<QuickActionsModalProps> = ({
   currentRole,
   onNavigateToTab,
   onOpenAuditLogs,
-  onOpenSyncDetails,
   onOpenMobileQR
 }) => {
   const [query, setQuery] = useState('');
@@ -410,13 +407,6 @@ export const QuickActionsModal: React.FC<QuickActionsModalProps> = ({
                 >
                   <History className="h-3.5 w-3.5 text-slate-600" />
                   <span>Audit Trail</span>
-                </button>
-                <button
-                  onClick={() => { onClose(); onOpenSyncDetails(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors"
-                >
-                  <Wifi className="h-3.5 w-3.5 text-slate-600" />
-                  <span>Sync & Offline Suite</span>
                 </button>
                 {onOpenMobileQR && (
                   <button

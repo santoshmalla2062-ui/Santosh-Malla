@@ -35,6 +35,11 @@ import {
   StaffUser
 } from '../types';
 import { canActorAssignRole, canActorManageStaffMember } from './security';
+import {
+  sanitizeBusinessLogoUrl,
+  sanitizeMenuImageUrl,
+  sanitizePaymentQrDataUrl
+} from '../utils/imageUtils';
 
 export const MAX_SYNC_CHANNEL_BYTES = 550_000;
 
@@ -170,9 +175,7 @@ export interface CloudMemberRecord {
 }
 
 export const DEFAULT_WORKSPACE_CANDIDATES = [
-  'biz-himalayan-breeze',
-  'biz-annapurna-cafe',
-  'biz-pokhara-lodge'
+  'biz-himalayan-breeze'
 ] as const;
 
 export interface WorkspaceAccessDirectoryEntry {
@@ -275,20 +278,10 @@ export function canFreeSwitchRoles(params: {
 }
 
 /**
- * Determines whether the LoginModal should allow displaying unprivileged demo PIN shortcuts.
- * Never exposes OWNER, ADMIN, or SUPER_ADMIN PINs under any circumstances.
+ * Production builds never expose factory demo PIN shortcuts on the login modal.
  */
-export function getVisibleDemoPinRoles(ownerControlLocked: boolean): { role: StaffRole; pin: string; label: string }[] {
-  if (ownerControlLocked) {
-    return [];
-  }
-  return [
-    { role: 'MANAGER', pin: '1234', label: 'Manager' },
-    { role: 'CASHIER', pin: '2233', label: 'Cashier' },
-    { role: 'WAITER', pin: '3344', label: 'Waiter' },
-    { role: 'KITCHEN', pin: '4455', label: 'Kitchen' },
-    { role: 'HOUSEKEEPING', pin: '6677', label: 'Housekeeping' }
-  ];
+export function getVisibleDemoPinRoles(_ownerControlLocked: boolean): { role: StaffRole; pin: string; label: string }[] {
+  return [];
 }
 
 export function canRoleReadChannel(
@@ -516,6 +509,84 @@ function mergeArrayById<T extends { id: string }>(
   return merged;
 }
 
+function stripOrderItemsMedia(order: Order): Order {
+  if (!Array.isArray(order.items) || order.items.length === 0) return order;
+  let hadImage = false;
+  const cleanedItems = order.items.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    if ('imageUrl' in (item as unknown as Record<string, unknown>)) {
+      hadImage = true;
+      const { imageUrl: _droppedImg, ...restItem } = item as unknown as Record<string, unknown>;
+      return restItem as unknown as typeof item;
+    }
+    return item;
+  });
+  return hadImage ? { ...order, items: cleanedItems } : order;
+}
+
+/**
+ * Returns true when a syncChannels document payload actually holds meaningful user/business data.
+ * Prevents creating empty placeholder documents in Firestore for unused modules.
+ */
+export function isChannelPayloadMeaningful(channelId: SyncChannelId, payload: Record<string, any>): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  switch (channelId) {
+    case 'orders_live':
+      return Boolean(
+        (Array.isArray(payload.orders) && payload.orders.length > 0) ||
+          (typeof payload.activeOrderId === 'string' && payload.activeOrderId.trim().length > 0)
+      );
+    case 'menu_tables':
+      return Boolean(
+        (Array.isArray(payload.menuItems) && payload.menuItems.length > 0) ||
+          (Array.isArray(payload.tablesRooms) && payload.tablesRooms.length > 0)
+      );
+    case 'inventory_ledger':
+      return Boolean(
+        (Array.isArray(payload.inventoryItems) && payload.inventoryItems.length > 0) ||
+          (Array.isArray(payload.inventoryLogs) && payload.inventoryLogs.length > 0) ||
+          (Array.isArray(payload.stockMovements) && payload.stockMovements.length > 0) ||
+          (Array.isArray(payload.recipes) && payload.recipes.length > 0) ||
+          (Array.isArray(payload.suppliers) && payload.suppliers.length > 0) ||
+          (Array.isArray(payload.purchaseOrders) && payload.purchaseOrders.length > 0)
+      );
+    case 'finance_records':
+      return Boolean(
+        (Array.isArray(payload.customers) && payload.customers.length > 0) ||
+          (Array.isArray(payload.khataTransactions) && payload.khataTransactions.length > 0) ||
+          (Array.isArray(payload.expenses) && payload.expenses.length > 0) ||
+          (Array.isArray(payload.dayClosings) && payload.dayClosings.length > 0) ||
+          (Array.isArray(payload.receivables) && payload.receivables.length > 0) ||
+          (Array.isArray(payload.supplierPayables) && payload.supplierPayables.length > 0) ||
+          (Array.isArray(payload.supplierPayments) && payload.supplierPayments.length > 0) ||
+          (Array.isArray(payload.cashRegisters) && payload.cashRegisters.length > 0) ||
+          (Array.isArray(payload.journalEntries) && payload.journalEntries.length > 0) ||
+          (Array.isArray(payload.creditNotes) && payload.creditNotes.length > 0) ||
+          (typeof payload.panVatNumber === 'string' && payload.panVatNumber.trim().length > 0)
+      );
+    case 'resort_ops':
+      return Boolean(
+        (Array.isArray(payload.roomTypes) && payload.roomTypes.length > 0) ||
+          (Array.isArray(payload.resortRooms) && payload.resortRooms.length > 0) ||
+          (Array.isArray(payload.guestProfiles) && payload.guestProfiles.length > 0) ||
+          (Array.isArray(payload.reservations) && payload.reservations.length > 0) ||
+          (Array.isArray(payload.guestFolioItems) && payload.guestFolioItems.length > 0) ||
+          (Array.isArray(payload.resortServices) && payload.resortServices.length > 0) ||
+          (Array.isArray(payload.housekeepingTasks) && payload.housekeepingTasks.length > 0) ||
+          (Array.isArray(payload.maintenanceIssues) && payload.maintenanceIssues.length > 0) ||
+          (Array.isArray(payload.hotelPayments) && payload.hotelPayments.length > 0) ||
+          (Array.isArray(payload.nightAudits) && payload.nightAudits.length > 0)
+      );
+    case 'admin_controls':
+      return Boolean(
+        payload.settings ||
+          (Array.isArray(payload.staffUsers) && payload.staffUsers.length > 0) ||
+          (Array.isArray(payload.auditLogs) && payload.auditLogs.length > 0) ||
+          (Array.isArray(payload.staffInvitations) && payload.staffInvitations.length > 0)
+      );
+  }
+}
+
 /**
  * Builds a bounded, byte-budgeted blueprint-compliant payload for /syncChannels/{channelId}.data.
  */
@@ -524,8 +595,8 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
     case 'orders_live': {
       // Keep syncChannels/orders_live strictly bounded (<450 KB) to prevent 1 MB Firestore limit errors.
       // Full & historical orders are sharded individually in /businesses/{businessId}/orders/{orderId}.
-      const activeOrders = (state.orders || []).filter((o) => o.status === 'active').slice(0, 120);
-      const recentArchivedOrders = (state.orders || []).filter((o) => o.status !== 'active').slice(0, 50);
+      const activeOrders = (state.orders || []).filter((o) => o.status === 'active').slice(0, 120).map(stripOrderItemsMedia);
+      const recentArchivedOrders = (state.orders || []).filter((o) => o.status !== 'active').slice(0, 30).map(stripOrderItemsMedia);
 
       // Fit active orders first, then allocate remaining byte budget to recent archived window
       const maxOrdersBytes = 420_000;
@@ -540,8 +611,12 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
       });
     }
     case 'menu_tables': {
+      const sanitizedMenu = (state.menuItems || []).slice(0, 400).map((item) => ({
+        ...item,
+        imageUrl: sanitizeMenuImageUrl(item.imageUrl)
+      }));
       const payload = sanitizeForFirestore({
-        menuItems: (state.menuItems || []).slice(0, 400),
+        menuItems: sanitizedMenu,
         tablesRooms: (state.tablesRooms || []).slice(0, 200)
       });
       return enforceChannelPayloadByteBudget(payload, ['menuItems', 'tablesRooms']);
@@ -576,8 +651,8 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
         supplierPayments: (state.supplierPayments || []).slice(0, 150),
         cashRegisters: (state.cashRegisters || []).slice(0, 80),
         accounts: (state.accounts || []).slice(0, 100),
-        journalEntries: (state.journalEntries || []).slice(0, 25),
-        creditNotes: (state.creditNotes || []).slice(0, 25),
+        journalEntries: (state.journalEntries || []).slice(0, 10),
+        creditNotes: (state.creditNotes || []).slice(0, 10),
         paymentMethodsConfig: state.settings?.paymentMethodsConfig,
         panVatNumber: state.settings?.panVatNumber
       });
@@ -595,8 +670,12 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
       ]);
     }
     case 'resort_ops': {
+      const sanitizedRoomTypes = (state.roomTypes || []).slice(0, 80).map((rt) => ({
+        ...rt,
+        imageUrl: sanitizeMenuImageUrl(rt.imageUrl)
+      }));
       const payload = sanitizeForFirestore({
-        roomTypes: (state.roomTypes || []).slice(0, 80),
+        roomTypes: sanitizedRoomTypes,
         resortRooms: (state.resortRooms || []).slice(0, 150),
         guestProfiles: (state.guestProfiles || []).slice(0, 250),
         reservations: (state.reservations || []).slice(0, 200),
@@ -619,10 +698,19 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
     }
     case 'admin_controls': {
       // Full AuditLogs are sharded into /businesses/{businessId}/auditLogs/{logId};
-      // keep only recent 30 audit tail + enforce strict byte budget.
+      // keep only recent 10 audit tail + enforce strict byte budget & media sanitization.
       const sanitizedSettings = state.settings
         ? {
             ...state.settings,
+            logoUrl: sanitizeBusinessLogoUrl(state.settings.logoUrl),
+            paymentMethodsConfig: Array.isArray(state.settings.paymentMethodsConfig)
+              ? state.settings.paymentMethodsConfig.map((pm) => ({
+                  ...pm,
+                  qrImageDataUrl: pm.qrImageDataUrl
+                    ? sanitizePaymentQrDataUrl(pm.qrImageDataUrl)
+                    : undefined
+                }))
+              : state.settings.paymentMethodsConfig,
             securitySettings: state.settings.securitySettings
               ? (() => {
                   const { masterOwnerEmail: _dropped, ...restSec } = state.settings.securitySettings;
@@ -643,7 +731,7 @@ export function extractChannelPayload(channelId: SyncChannelId, state: AppState)
       const payload = sanitizeForFirestore({
         settings: sanitizedSettings,
         staffUsers: sanitizedStaff,
-        auditLogs: (state.auditLogs || []).slice(0, 30),
+        auditLogs: (state.auditLogs || []).slice(0, 10),
         staffInvitations: (state.staffInvitations || []).slice(0, 100)
       });
       return enforceChannelPayloadByteBudget(payload, ['auditLogs', 'staffInvitations']);
@@ -803,7 +891,14 @@ export function buildSanitizedOrderDocPayload(
       : 'pending';
   const safeItems = (Array.isArray(order.items) ? order.items : [])
     .filter((item) => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-    .slice(0, 100);
+    .slice(0, 100)
+    .map((item) => {
+      if ('imageUrl' in (item as unknown as Record<string, unknown>)) {
+        const { imageUrl: _droppedImg, ...rest } = item as unknown as Record<string, unknown>;
+        return rest;
+      }
+      return item;
+    });
 
   const clean: Record<string, any> = {
     id: order.id,
@@ -1009,16 +1104,19 @@ export async function bootstrapMasterOwnerWorkspace(
         }
       } else {
         const payload = extractChannelPayload(channelId, localState);
-        await setDoc(channelRef, {
-          channelId,
-          businessId: business.businessId,
-          ownerUid: businessMeta.ownerUid,
-          updatedByUid: user.uid,
-          revision: 1,
-          data: payload,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+        if (isChannelPayloadMeaningful(channelId, payload)) {
+          await setDoc(channelRef, {
+            channelId,
+            businessId: business.businessId,
+            ownerUid: businessMeta.ownerUid,
+            updatedByUid: user.uid,
+            revision: 1,
+            data: payload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          existingChannels[channelId] = payload;
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, channelPath);
@@ -1104,6 +1202,7 @@ export async function registerBusinessInCloud(
     for (const channelId of ALL_SYNC_CHANNELS) {
       const channelRef = doc(db, 'businesses', business.businessId, 'syncChannels', channelId);
       const payload = extractChannelPayload(channelId, localState);
+      if (!isChannelPayloadMeaningful(channelId, payload)) continue;
       await setDoc(channelRef, {
         channelId,
         businessId: business.businessId,

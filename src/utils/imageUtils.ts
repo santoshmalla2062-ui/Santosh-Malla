@@ -1,4 +1,4 @@
-export const MAX_PAYMENT_QR_DATA_URL_LENGTH = 550_000; // ~400KB binary ceiling to keep Firestore settings doc well below 1MB
+export const MAX_PAYMENT_QR_DATA_URL_LENGTH = 200_000; // ~150KB binary ceiling to keep Firestore settings doc compact
 export const MAX_PAYMENT_QR_UPLOAD_FILE_BYTES = 8 * 1024 * 1024; // 8MB raw file limit before client-side resize
 
 const SAFE_IMAGE_DATA_URL_REGEX =
@@ -105,9 +105,12 @@ export async function compressPaymentQrImageFile(
   return output;
 }
 
-export const MAX_BUSINESS_LOGO_DATA_URL_LENGTH = 150_000; // ~110KB binary ceiling to keep cloud sync channel compact
+export const MAX_BUSINESS_LOGO_DATA_URL_LENGTH = 100_000; // ~75KB binary ceiling to keep cloud sync channel compact
 export const MAX_BUSINESS_LOGO_UPLOAD_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_BUSINESS_LOGO_EXTERNAL_URL_LENGTH = 2048;
+
+export const MAX_MENU_IMAGE_DATA_URL_LENGTH = 120_000; // ~90KB binary ceiling for uploaded dish photos
+export const MAX_MENU_IMAGE_UPLOAD_FILE_BYTES = 8 * 1024 * 1024;
 
 /**
  * Validates that a business logo string is either a safe bounded raster base64 data URI
@@ -146,6 +149,124 @@ export function isValidBusinessLogoUrl(value?: string | null): value is string {
 export function sanitizeBusinessLogoUrl(value?: string | null): string | undefined {
   if (!isValidBusinessLogoUrl(value)) return undefined;
   return value.trim();
+}
+
+/**
+ * Validates that a menu item / room photo string is either a safe bounded raster base64 data URI
+ * (<= MAX_MENU_IMAGE_DATA_URL_LENGTH) or a safe http(s)/relative image URL.
+ */
+export function isValidMenuImageUrl(value?: string | null): value is string {
+  if (!value || typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed || /[\u0000-\u001F\u007F]/.test(trimmed)) return false;
+
+  if (/^data:/i.test(trimmed)) {
+    if (trimmed.length > MAX_MENU_IMAGE_DATA_URL_LENGTH) return false;
+    return SAFE_IMAGE_DATA_URL_REGEX.test(trimmed);
+  }
+
+  if (trimmed.length > MAX_BUSINESS_LOGO_EXTERNAL_URL_LENGTH || /\s/.test(trimmed)) {
+    return false;
+  }
+
+  if (trimmed.startsWith('/') || trimmed.startsWith('./')) {
+    return !/^\/\//.test(trimmed);
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sanitizes a menu item or room image URL/data URI, returning undefined if unsafe or oversized.
+ */
+export function sanitizeMenuImageUrl(value?: string | null): string | undefined {
+  if (!isValidMenuImageUrl(value)) return undefined;
+  return value.trim();
+}
+
+/**
+ * Reads an uploaded menu dish photo in the browser and compresses it to a compact
+ * WebP/JPEG data URL (<= 120KB) so menu items never bloat Firestore sync channels.
+ */
+export async function compressMenuImageFile(
+  file: File,
+  maxDimension: number = 400
+): Promise<string> {
+  if (!file) {
+    throw new Error('No image file selected.');
+  }
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+  if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
+    throw new Error('Unsupported file type. Please upload a PNG, JPG, or WebP photo.');
+  }
+  if (file.size > MAX_MENU_IMAGE_UPLOAD_FILE_BYTES) {
+    throw new Error('Dish image file is too large (max 8 MB).');
+  }
+
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Could not read uploaded image.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
+
+  if (typeof document === 'undefined' || typeof Image === 'undefined') {
+    const sanitized = sanitizeMenuImageUrl(rawDataUrl);
+    if (!sanitized) {
+      throw new Error('Image format or size exceeds limit.');
+    }
+    return sanitized;
+  }
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const imageEl = new Image();
+    imageEl.onload = () => resolve(imageEl);
+    imageEl.onerror = () => reject(new Error('Invalid or corrupted image file.'));
+    imageEl.src = rawDataUrl;
+  });
+
+  const srcWidth = img.naturalWidth || img.width || maxDimension;
+  const srcHeight = img.naturalHeight || img.height || maxDimension;
+  const scale = Math.min(1, maxDimension / Math.max(srcWidth, srcHeight));
+  const targetWidth = Math.max(1, Math.round(srcWidth * scale));
+  const targetHeight = Math.max(1, Math.round(srcHeight * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Browser canvas is unavailable for image processing.');
+  }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+  let output = canvas.toDataURL('image/webp', 0.82);
+  if (!isValidMenuImageUrl(output)) {
+    output = canvas.toDataURL('image/jpeg', 0.82);
+  }
+  if (!isValidMenuImageUrl(output)) {
+    output = canvas.toDataURL('image/jpeg', 0.65);
+  }
+  if (!isValidMenuImageUrl(output)) {
+    throw new Error('Processed photo exceeds cloud sync size limit. Please use a smaller image.');
+  }
+
+  return output;
 }
 
 /**

@@ -20,7 +20,6 @@ import {
   FileCheck,
   CalendarClock,
   ArrowRightLeft,
-  ShieldCheck,
   Printer,
   DollarSign,
   Tag,
@@ -55,7 +54,6 @@ import {
   recordStockAuditAdjustment, 
   recordStockTransfer 
 } from '../../services/inventoryFinanceService';
-import { InventoryFinanceWorkflowTestModal } from './InventoryFinanceWorkflowTestModal';
 
 interface InventoryViewProps {
   inventoryItems: InventoryItem[];
@@ -109,7 +107,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [activeTab, setActiveTab] = useState<InventorySubTab>('inventory');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<InventoryCategory | 'all'>('all');
-  const [showTestModal, setShowTestModal] = useState(false);
 
   // Stock In Modal
   const [stockInTarget, setStockInTarget] = useState<InventoryItem | null>(null);
@@ -526,12 +523,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setShowTestModal(true)}
-              className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" /> Run Phase 6 Tests
-            </button>
             <button
               onClick={() => setShowAddModal(true)}
               className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs"
@@ -1823,42 +1814,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
       )}
 
-      {/* Automated Test Suite Modal */}
-      {showTestModal && (
-        <InventoryFinanceWorkflowTestModal
-          isOpen={showTestModal}
-          onClose={() => setShowTestModal(false)}
-          activeBusiness={activeBusiness || { businessId: settings.businessId || 'biz-default', businessName: settings.businessName || 'Business' } as any}
-          appState={{
-            inventoryItems,
-            inventoryLogs,
-            stockMovements,
-            recipes,
-            suppliers,
-            purchaseOrders,
-            orders: [],
-            menuItems,
-            tablesRooms: [],
-            customers: [],
-            khataTransactions: [],
-            expenses: [],
-            dayClosings: [],
-            staffUsers: [],
-            auditLogs: [],
-            settings,
-            roomTypes: [],
-            resortRooms: [],
-            guestProfiles: [],
-            reservations: [],
-            guestFolioItems: [],
-            resortServices: [],
-            housekeepingTasks: [],
-            maintenanceIssues: [],
-            hotelPayments: []
-          }}
-          currentSession={currentSession || null}
-        />
-      )}
     </div>
   );
 };

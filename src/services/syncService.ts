@@ -371,6 +371,16 @@ function saveOfflineQueue(businessId: string, queue: OfflineQueueItem[]): void {
   }
 }
 
+export function clearOfflineQueue(businessId: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.removeItem(OFFLINE_QUEUE_PREFIX + businessId);
+    notifyConnectionStatusChange(businessId);
+  } catch (err) {
+    console.error('Failed to clear offline queue:', err);
+  }
+}
+
 /**
  * Verifies if an operation is safe for offline queuing.
  * Sensitive financial transactions (settlement, refunds, inventory adjustment, room check-in) MUST NOT be executed offline.

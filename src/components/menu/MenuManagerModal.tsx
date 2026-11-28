@@ -29,6 +29,7 @@ import {
 } from '../../types';
 import { Language } from '../../utils/translations';
 import { getMenuItemImageUrl } from '../../utils/menuImages';
+import { compressMenuImageFile, sanitizeMenuImageUrl } from '../../utils/imageUtils';
 
 interface MenuManagerModalProps {
   menuItems: MenuItem[];
@@ -210,25 +211,23 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
     }
   };
 
-  // Image file upload handler
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image file upload handler (resizes & compresses to compact WebP/JPEG for Firestore sync)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.size > 2.5 * 1024 * 1024) {
-      setImageError(lang === 'ne' ? 'कृपया २.५ MB भन्दा सानो फोटो छान्नुहोस्।' : 'Please choose an image under 2.5MB.');
-      e.target.value = '';
-      return;
-    }
     setImageError(null);
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImageUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressMenuImageFile(file);
+      setImageUrl(compressed);
+    } catch (err: any) {
+      setImageError(
+        err?.message ||
+          (lang === 'ne' ? 'कृपया मान्य र सानो फोटो छान्नुहोस्।' : 'Please choose a valid photo within size limits.')
+      );
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleAddVariant = () => {
@@ -257,6 +256,17 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
     e.preventDefault();
     if (!name.trim() || !code.trim() || price <= 0) return;
 
+    const rawImage = imageUrl.trim();
+    const safeImageUrl = rawImage ? sanitizeMenuImageUrl(rawImage) : undefined;
+    if (rawImage && !safeImageUrl) {
+      setImageError(
+        lang === 'ne'
+          ? 'फोटो URL वा साइज मान्य छैन (कृपया सानो फोटो अपलोड वा https लिंक राख्नुहोस्)।'
+          : 'Invalid or oversized image. Please upload a photo from device or use a valid https:// URL.'
+      );
+      return;
+    }
+
     const finalItem: MenuItem = {
       id: isAddingNew ? ('m-' + Date.now()) : (editingItem ? editingItem.id : 'm-' + Date.now()),
       code: code.trim(),
@@ -267,7 +277,7 @@ export const MenuManagerModal: React.FC<MenuManagerModalProps> = ({
       costPrice,
       station,
       preparationTimeMinutes: prepTime,
-      imageUrl: imageUrl.trim() || undefined,
+      imageUrl: safeImageUrl,
       isAvailable: editingItem ? editingItem.isAvailable : true,
       variants: variants.length > 0 ? variants : undefined,
       addOns: addOns.length > 0 ? addOns : undefined,

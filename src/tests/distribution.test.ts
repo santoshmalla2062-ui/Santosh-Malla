@@ -10,7 +10,11 @@ import {
   buildAppDownloadUrl,
   buildWebsiteDownloadSnippet,
   isDownloadRouteRequested,
-  sanitizeAndroidApkUrl
+  sanitizeAndroidApkUrl,
+  encodeCompactMenuPayload,
+  decodeCompactMenuPayload,
+  buildDigitalMenuUrl,
+  isDigitalMenuRouteRequested
 } from '../utils/distribution';
 
 test('Distribution: Sanitizes valid custom domain URLs and rejects unsafe URI schemes', () => {
@@ -105,5 +109,37 @@ test('Distribution: Flags ais-pre AI Studio preview hosts and falls back to GitH
     SHARED_APP_URL
   );
 });
+
+test('Distribution: Digital Menu QR builds ?menu=1 URLs and round-trips Unicode menu items safely', () => {
+  assert.equal(isDigitalMenuRouteRequested('?menu=1&biz=cafe-1'), true);
+  assert.equal(isDigitalMenuRouteRequested('?menu=true'), true);
+  assert.equal(isDigitalMenuRouteRequested('?download=1'), false);
+
+  const encoded = encodeCompactMenuPayload({
+    bn: 'CAFE HOST',
+    cur: 'Rs.',
+    items: [
+      { n: 'Masala Chai (मसल चिया)', c: 'tea', p: 80, o: 65, d: 'Fresh ginger spice' },
+      { n: 'Chicken Momo', c: 'snacks', p: 220 }
+    ]
+  });
+  const decoded = decodeCompactMenuPayload(encoded);
+  assert.ok(decoded);
+  assert.equal(decoded?.bn, 'CAFE HOST');
+  assert.equal(decoded?.items.length, 2);
+  assert.equal(decoded?.items[0].n, 'Masala Chai (मसल चिया)');
+  assert.equal(decoded?.items[0].o, 65);
+
+  const url = buildDigitalMenuUrl({
+    baseUrl: 'https://pos.cafehost.com',
+    businessId: 'biz-himalayan-breeze',
+    tableName: 'T-3',
+    businessName: 'CAFE HOST',
+    currencySymbol: 'Rs.',
+    menuItems: [{ name: 'Americano', category: 'coffee', price: 180, isAvailable: true }]
+  });
+  assert.ok(url.startsWith('https://pos.cafehost.com/?menu=1&biz=biz-himalayan-breeze&table=T-3&m='));
+});
+
 
 

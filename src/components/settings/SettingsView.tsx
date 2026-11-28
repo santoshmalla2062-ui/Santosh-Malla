@@ -2116,7 +2116,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </button>
                 </div>
 
-                {/* Clear Demo Data Button */}
+                {/* Reset Workspace Data Button */}
                 <button
                   type="button"
                   disabled={!canImportBackup}
@@ -2124,7 +2124,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="flex items-center justify-center gap-2 py-2.5 px-4 bg-white hover:bg-rose-50 disabled:opacity-40 text-rose-700 border border-slate-300 rounded-xl text-xs font-semibold transition-all shadow-2xs hover:border-rose-300"
                 >
                   <RotateCcw className="h-4 w-4 text-rose-600" />
-                  <span>{lang === 'ne' ? 'सबै डेमो डेटा हटाउनुहोस्' : 'Clear Demo Data (Clean Start)'}</span>
+                  <span>{lang === 'ne' ? 'कार्यस्थल डेटा रिसेट गर्नुहोस्' : 'Reset Workspace Data (Clean Start)'}</span>
                 </button>
               </div>
             </div>
@@ -2482,10 +2482,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200 p-5 space-y-4 text-xs">
             <div className="flex items-center gap-2.5 text-rose-700 font-bold text-sm">
               <AlertTriangle className="h-5 w-5 shrink-0" />
-              <span>Confirm Demo Data Reset</span>
+              <span>{lang === 'ne' ? 'कार्यस्थल रिसेट पुष्टि गर्नुहोस्' : 'Confirm Workspace Reset'}</span>
             </div>
             <p className="text-slate-600">
-              Are you sure you want to reset all records to the original default sample data? All newly added orders and transactions will be cleared.
+              {lang === 'ne'
+                ? 'के तपाईं सबै अर्डर, कोठा बुकिङ र लेनदेन हटाएर कार्यस्थल खाली सुरुवातमा रिसेट गर्न चाहनुहुन्छ?'
+                : 'Are you sure you want to clear all operational records and reset this workspace to a clean empty state? This action cannot be undone.'}
             </p>
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
@@ -2493,18 +2495,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onClick={() => setShowResetConfirm(false)}
                 className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
-                Cancel
+                {lang === 'ne' ? 'रद्द गर्नुहोस्' : 'Cancel'}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   onResetSampleData();
                   setShowResetConfirm(false);
-                  setNotification({ type: 'success', message: 'Sample data reset completed.' });
+                  setNotification({
+                    type: 'success',
+                    message: lang === 'ne' ? 'कार्यस्थल सफासँग रिसेट गरियो।' : 'Workspace data reset completed.'
+                  });
                 }}
                 className="px-4 py-2 font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-xl"
               >
-                Confirm Reset
+                {lang === 'ne' ? 'रिसेट पुष्टि गर्नुहोस्' : 'Confirm Reset'}
               </button>
             </div>
           </div>

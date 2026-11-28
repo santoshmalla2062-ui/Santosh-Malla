@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAX_BUSINESS_LOGO_DATA_URL_LENGTH,
+  MAX_MENU_IMAGE_DATA_URL_LENGTH,
   MAX_PAYMENT_QR_DATA_URL_LENGTH,
   isValidBusinessLogoUrl,
+  isValidMenuImageUrl,
   isValidPaymentQrDataUrl,
   sanitizeBusinessLogoUrl,
+  sanitizeMenuImageUrl,
   sanitizePaymentQrDataUrl
 } from '../utils/imageUtils';
 
@@ -55,5 +58,18 @@ test('isValidBusinessLogoUrl blocks SVG, javascript:, protocol-relative, whitesp
   const oversizedLogo = 'data:image/png;base64,' + 'A'.repeat(MAX_BUSINESS_LOGO_DATA_URL_LENGTH + 10);
   assert.equal(isValidBusinessLogoUrl(oversizedLogo), false);
   assert.equal(sanitizeBusinessLogoUrl(oversizedLogo), undefined);
+});
+
+test('isValidMenuImageUrl enforces size limits and blocks unsafe schemes', () => {
+  const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  assert.equal(isValidMenuImageUrl(validPng), true);
+  assert.equal(sanitizeMenuImageUrl(`  ${validPng}  `), validPng);
+  assert.equal(isValidMenuImageUrl('https://cdn.example.com/momo.webp'), true);
+  assert.equal(isValidMenuImageUrl('javascript:alert(1)'), false);
+  assert.equal(isValidMenuImageUrl('data:image/svg+xml;base64,PHN2Zy8+'), false);
+
+  const oversizedMenu = 'data:image/jpeg;base64,' + 'A'.repeat(MAX_MENU_IMAGE_DATA_URL_LENGTH + 10);
+  assert.equal(isValidMenuImageUrl(oversizedMenu), false);
+  assert.equal(sanitizeMenuImageUrl(oversizedMenu), undefined);
 });
 

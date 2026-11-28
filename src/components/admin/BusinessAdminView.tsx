@@ -41,12 +41,9 @@ import {
   Volume2,
   RefreshCw,
   UtensilsCrossed,
-  Zap,
   Globe,
   Upload,
   QrCode,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Share2
 } from 'lucide-react';
@@ -111,9 +108,6 @@ import {
   isMasterOwnerEmail
 } from '../../services/cloudSyncService';
 import { InviteStaffModal } from './InviteStaffModal';
-import { BusinessDataIsolationTestModal } from './BusinessDataIsolationTestModal';
-import { HospitalityWorkflowTestModal } from './HospitalityWorkflowTestModal';
-import { SyncResilienceTestModal } from './SyncResilienceTestModal';
 import { computeTodayOrderAuditSummary } from '../../services/orderAudit';
 import { TodayOperationsAuditPanel } from '../reports/TodayOperationsAuditPanel';
 
@@ -233,10 +227,6 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
   const [staffRoleFilter, setStaffRoleFilter] = useState<string>('ALL');
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [showIsolationTestModal, setShowIsolationTestModal] = useState(false);
-  const [showWorkflowTestModal, setShowWorkflowTestModal] = useState(false);
-  const [showSyncTestModal, setShowSyncTestModal] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [uploadingQrPaymentId, setUploadingQrPaymentId] = useState<string | null>(null);
   const [paymentQrError, setPaymentQrError] = useState<string | null>(null);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
@@ -2566,6 +2556,64 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
             </p>
           </div>
 
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <p className="text-xs font-bold text-slate-800">Quick Workspace Modes (1-Click Preset)</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateBusiness(business.businessId, {
+                    enabledModules: [
+                      'pos',
+                      'billing',
+                      'tables_rooms',
+                      'kds',
+                      'inventory',
+                      'customers',
+                      'day_closing',
+                      'reports',
+                      'settings',
+                      'business_admin'
+                    ]
+                  })
+                }
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 transition-colors"
+              >
+                Cafe & Restaurant Only (No Resort)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateBusiness(business.businessId, {
+                    enabledModules: [
+                      'pos',
+                      'billing',
+                      'tables_rooms',
+                      'customers',
+                      'day_closing',
+                      'settings',
+                      'business_admin'
+                    ]
+                  })
+                }
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-950 transition-colors"
+              >
+                Simple Counter POS (Minimal)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateBusiness(business.businessId, {
+                    enabledModules: [...ALL_APP_MODULES]
+                  })
+                }
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 transition-colors"
+              >
+                Full Cafe + Restaurant + Resort
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {ALL_APP_MODULES.map(mod => {
               const isEnabled = business.enabledModules.includes(mod);
@@ -3713,59 +3761,20 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
             )}
           </div>
 
-          {/* Data Isolation & Collapsible System Diagnostics */}
-          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3 text-xs">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                <div>
-                  <h4 className="font-bold text-emerald-950">Multi-Tenant Data Isolation Active</h4>
-                  <p className="text-emerald-800 text-[11px]">
-                    Enterprise partition: <span className="font-mono font-bold">{business.businessId}</span>
-                  </p>
-                </div>
+          {/* Data Isolation Info */}
+          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              <div>
+                <h4 className="font-bold text-emerald-950">Multi-Tenant Data Isolation Active</h4>
+                <p className="text-emerald-800 text-[11px]">
+                  Enterprise partition: <span className="font-mono font-bold">{business.businessId}</span>
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowDiagnostics(!showDiagnostics)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-100/60 text-emerald-900 border border-emerald-300 text-xs font-bold transition-colors"
-              >
-                {showDiagnostics ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                <span>{lang === 'ne' ? 'सिस्टम डायग्नोस्टिक जाँच' : 'Developer Diagnostics'}</span>
-              </button>
             </div>
             <p className="text-emerald-800 text-[11px] leading-relaxed">
               All POS records, dining tables, inventory items, resort reservations, guest profiles, khata ledgers, and financial reports are partitioned strictly under <span className="font-semibold">{business.businessName}</span>. Cross-tenant leakage is prevented at storage and Firestore security rule levels.
             </p>
-
-            {showDiagnostics && (
-              <div className="pt-3 border-t border-emerald-200/80 flex items-center flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowIsolationTestModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  <span>Verify Data Isolation</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowWorkflowTestModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>Verify Workflows</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSyncTestModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs"
-                >
-                  <Zap className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>Verify Real-Time & Sync</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -4295,30 +4304,6 @@ export const BusinessAdminView: React.FC<BusinessAdminViewProps> = ({
           </div>
         </div>
       )}
-
-      {/* Multi-Tenant Data Isolation Test Runner Modal */}
-      <BusinessDataIsolationTestModal
-        isOpen={showIsolationTestModal}
-        onClose={() => setShowIsolationTestModal(false)}
-        currentRole={currentSession?.role}
-      />
-
-      {/* End-to-End Hospitality Workflows Test Runner Modal */}
-      <HospitalityWorkflowTestModal
-        isOpen={showWorkflowTestModal}
-        onClose={() => setShowWorkflowTestModal(false)}
-        activeBusiness={business}
-        appState={appState}
-        currentSession={currentSession}
-      />
-
-      {/* Real-Time Sync & Offline Resilience Test Runner Modal */}
-      <SyncResilienceTestModal
-        isOpen={showSyncTestModal}
-        onClose={() => setShowSyncTestModal(false)}
-        activeBusinessId={business.businessId}
-        appState={appState}
-      />
 
       {/* Menu Dishes Manager Modal */}
       {showAdminMenuManager && (

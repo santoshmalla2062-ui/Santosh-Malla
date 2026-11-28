@@ -223,6 +223,75 @@ ${paymentBlock}
 Cashier                                 ${cashierName}${serverName ? `\nServer                                  ${serverName}` : ''}
 
 Thank you, please come again
-Powered by Himalayan Breeze POS
+Powered by CAFE HOST POS
 `;
+}
+
+export function normalizeWhatsAppPhone(rawPhone?: string): string {
+  const digits = String(rawPhone || '').replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('977') && digits.length >= 12) return digits;
+  const trimmedLeadingZero = digits.replace(/^0+/, '');
+  if (trimmedLeadingZero.length === 10 && trimmedLeadingZero.startsWith('9')) {
+    return `977${trimmedLeadingZero}`;
+  }
+  if (trimmedLeadingZero.length >= 7 && trimmedLeadingZero.length <= 15) {
+    return trimmedLeadingZero;
+  }
+  return '';
+}
+
+export function buildWhatsAppBillUrl(params: {
+  order: Order;
+  settings: BusinessSettings;
+  billType: 'estimate' | 'tax_invoice';
+  displayDateStr: string;
+}): string {
+  const { order, settings, billType, displayDateStr } = params;
+  const currency = settings.currencySymbol || 'Rs.';
+  const isEst = billType === 'estimate';
+  const effectiveServicePct = getEffectiveServicePercent(order, settings);
+  const paymentRows = buildReceiptPaymentRows(order, billType);
+  const { cashierName } = getReceiptAttribution(order);
+  const businessTitle = (settings.businessName || 'CAFE HOST').trim();
+
+  const lines: string[] = [
+    `*${businessTitle}*`,
+    settings.address ? `${settings.address}` : '',
+    settings.phone ? `Tel: ${settings.phone}` : '',
+    !isEst && settings.panVatNumber ? `PAN/VAT: ${settings.panVatNumber}` : '',
+    '',
+    `*${isEst ? 'ESTIMATE SLIP' : 'TAX INVOICE'}*`,
+    `Bill: #${order.invoiceNo || order.kotNo || order.id.slice(0, 8)}`,
+    `Date: ${displayDateStr}`,
+    `Order: ${getReceiptOrderTypeFormatted(order)}`,
+    order.customerName ? `Customer: ${order.customerName}` : '',
+    '------------------------------',
+    ...order.items.map(
+      (item, idx) =>
+        `${idx + 1}. ${item.name} x${item.quantity} = ${currency}${(item.price * item.quantity).toFixed(2)}`
+    ),
+    '------------------------------',
+    `Subtotal: ${currency}${order.subtotal.toFixed(2)}`,
+    order.discountAmount > 0
+      ? `Discount (${(order.discountPercent || 0).toFixed(0)}%): -${currency}${order.discountAmount.toFixed(2)}`
+      : '',
+    effectiveServicePct > 0 || order.serviceChargeAmount > 0
+      ? `Service (${effectiveServicePct}%): ${currency}${(order.serviceChargeAmount || 0).toFixed(2)}`
+      : '',
+    settings.enableVat && order.vatAmount > 0
+      ? `VAT (${settings.vatRatePercent}%): ${currency}${(order.vatAmount || 0).toFixed(2)}`
+      : '',
+    `*GRAND TOTAL: ${currency}${order.grandTotal.toFixed(2)}*`,
+    ...paymentRows.map((row) => `${row.label}: ${row.amountText}`),
+    `Cashier: ${cashierName}`,
+    '',
+    settings.receiptFooterMessage || 'Thank you, please come again!'
+  ].filter((line, idx, arr) => !(line === '' && arr[idx - 1] === ''));
+
+  const messageText = lines.join('\n').trim();
+  const targetPhone = normalizeWhatsAppPhone(order.customerPhone);
+  return targetPhone
+    ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(messageText)}`
+    : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
 }

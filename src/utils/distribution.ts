@@ -180,3 +180,135 @@ export function isDownloadRouteRequested(search: string, pathname: string): bool
   }
   return /\/(download|install)\/?$/i.test(pathname || '');
 }
+
+export interface CompactDigitalMenuItem {
+  n: string; // name
+  c: string; // category
+  p: number; // price
+  o?: number; // offerPrice
+  d?: string; // short description
+}
+
+export interface CompactDigitalMenuPayload {
+  bn: string; // businessName
+  cur: string; // currencySymbol
+  items: CompactDigitalMenuItem[];
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 =
+    typeof btoa === 'function'
+      ? btoa(binary)
+      : Buffer.from(bytes).toString('base64');
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToBytes(b64Url: string): Uint8Array {
+  const padded = b64Url.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64Url.length + 3) % 4);
+  if (typeof atob === 'function') {
+    const binary = atob(padded);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      out[i] = binary.charCodeAt(i);
+    }
+    return out;
+  }
+  return new Uint8Array(Buffer.from(padded, 'base64'));
+}
+
+export function encodeCompactMenuPayload(payload: CompactDigitalMenuPayload): string {
+  try {
+    const compact: CompactDigitalMenuPayload = {
+      bn: (payload.bn || 'CAFE HOST').slice(0, 60),
+      cur: (payload.cur || 'Rs.').slice(0, 6),
+      items: (payload.items || []).slice(0, 50).map((it) => ({
+        n: String(it.n || '').slice(0, 48),
+        c: String(it.c || 'snacks').slice(0, 24),
+        p: Math.round((Number(it.p) || 0) * 100) / 100,
+        ...(typeof it.o === 'number' && it.o > 0 && it.o < it.p ? { o: Math.round(it.o * 100) / 100 } : {}),
+        ...(it.d ? { d: String(it.d).slice(0, 50) } : {})
+      }))
+    };
+    const json = JSON.stringify(compact);
+    const bytes = new TextEncoder().encode(json);
+    return bytesToBase64Url(bytes);
+  } catch {
+    return '';
+  }
+}
+
+export function decodeCompactMenuPayload(encoded?: string | null): CompactDigitalMenuPayload | null {
+  if (!encoded || typeof encoded !== 'string') return null;
+  try {
+    const bytes = base64UrlToBytes(encoded.trim());
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json) as Partial<CompactDigitalMenuPayload>;
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return {
+      bn: typeof parsed.bn === 'string' && parsed.bn.trim() ? parsed.bn.trim() : 'CAFE HOST',
+      cur: typeof parsed.cur === 'string' && parsed.cur.trim() ? parsed.cur.trim() : 'Rs.',
+      items: parsed.items
+        .filter((it) => it && typeof it.n === 'string' && it.n.trim())
+        .map((it) => ({
+          n: String(it.n).trim(),
+          c: typeof it.c === 'string' ? it.c : 'snacks',
+          p: Number(it.p) || 0,
+          ...(typeof it.o === 'number' && it.o > 0 ? { o: Number(it.o) } : {}),
+          ...(typeof it.d === 'string' && it.d.trim() ? { d: it.d.trim() } : {})
+        }))
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function buildDigitalMenuUrl(params: {
+  baseUrl: string;
+  businessId?: string;
+  tableName?: string;
+  businessName?: string;
+  currencySymbol?: string;
+  menuItems?: { name: string; category: string; price: number; isAvailable?: boolean; isOffer?: boolean; offerPrice?: number; description?: string }[];
+}): string {
+  const cleanBase = sanitizePublicBaseUrl(params.baseUrl) || SHARED_APP_URL;
+  const query: string[] = ['menu=1'];
+  if (params.businessId && /^[a-zA-Z0-9_-]{2,128}$/.test(params.businessId.trim())) {
+    query.push(`biz=${encodeURIComponent(params.businessId.trim())}`);
+  }
+  if (params.tableName && params.tableName.trim()) {
+    query.push(`table=${encodeURIComponent(params.tableName.trim().slice(0, 40))}`);
+  }
+  const availableItems = (params.menuItems || []).filter((m) => m.isAvailable !== false);
+  if (availableItems.length > 0) {
+    const encoded = encodeCompactMenuPayload({
+      bn: params.businessName || 'CAFE HOST',
+      cur: params.currencySymbol || 'Rs.',
+      items: availableItems.map((m) => ({
+        n: m.name,
+        c: m.category,
+        p: m.price,
+        ...(m.isOffer && typeof m.offerPrice === 'number' ? { o: m.offerPrice } : {}),
+        ...(m.description ? { d: m.description } : {})
+      }))
+    });
+    if (encoded && encoded.length <= 1400) {
+      query.push(`m=${encoded}`);
+    }
+  }
+  return `${cleanBase}/?${query.join('&')}`;
+}
+
+export function isDigitalMenuRouteRequested(search: string): boolean {
+  try {
+    const params = new URLSearchParams(search || '');
+    const menuFlag = (params.get('menu') || '').toLowerCase();
+    return menuFlag === '1' || menuFlag === 'true';
+  } catch {
+    return false;
+  }
+}
+

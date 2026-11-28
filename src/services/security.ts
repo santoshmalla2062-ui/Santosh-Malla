@@ -13,17 +13,6 @@ import {
   TableRoom 
 } from '../types';
 import { resolveOrderItemRecipeIngredients } from './orderAudit';
-import {
-  INITIAL_ROOM_TYPES,
-  INITIAL_RESORT_ROOMS,
-  INITIAL_GUEST_PROFILES,
-  INITIAL_RESERVATIONS,
-  INITIAL_GUEST_FOLIOS,
-  INITIAL_RESORT_SERVICES,
-  INITIAL_HOUSEKEEPING_TASKS,
-  INITIAL_MAINTENANCE_ISSUES,
-  INITIAL_HOTEL_PAYMENTS
-} from './storage';
 
 export const SESSION_STORAGE_KEY = 'himalayan_breeze_session_v1';
 

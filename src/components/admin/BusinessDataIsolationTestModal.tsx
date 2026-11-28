@@ -109,10 +109,11 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
 
     try {
       const cafeState = loadTenantAppState(cafe.businessId);
+      const originalCafeStaff = [...cafeState.staffUsers];
       const testStaff = await createStaffAccount('test_cashier_iso', 'Isolation Staff', 'परीक्षण कर्मचारी', 'CASHIER', '1122');
       testStaff.businessId = cafe.businessId;
 
-      // Add to cafe
+      // Add temporarily to cafe
       cafeState.staffUsers = [...cafeState.staffUsers, testStaff];
       saveTenantAppState(cafe.businessId, cafeState);
 
@@ -123,6 +124,10 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
       // Verify NOT in resort
       const verifiedResort = loadTenantAppState(resort.businessId);
       const foundInResort = verifiedResort.staffUsers.some(s => s.username === 'test_cashier_iso');
+
+      // Clean up temporary test staff immediately
+      verifiedCafe.staffUsers = originalCafeStaff;
+      saveTenantAppState(cafe.businessId, verifiedCafe);
 
       if (foundInCafe && !foundInResort) {
         updated[0].status = 'PASSED';
@@ -201,11 +206,11 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
 
     try {
       const restState = loadTenantAppState(restaurant.businessId);
-      const cafeStateBefore = loadTenantAppState(cafe.businessId);
+      const originalPaymentMethods = [...(restState.settings?.paymentMethodsConfig || [])];
 
-      // Modify restaurant payment config
+      // Modify restaurant payment config temporarily
       const testPaymentMethods = [
-        ...(restState.settings?.paymentMethodsConfig || []),
+        ...originalPaymentMethods,
         { id: 'pm-test-iso', name: 'Gourmet Dining Club Card', enabled: true, type: 'custom' as any, instructions: 'Exclusive club card' }
       ];
 
@@ -218,6 +223,10 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
 
       const hasInRest = restStateAfter.settings.paymentMethodsConfig?.some(p => p.id === 'pm-test-iso');
       const hasInCafe = cafeStateAfter.settings.paymentMethodsConfig?.some(p => p.id === 'pm-test-iso');
+
+      // Restore original payment methods
+      restStateAfter.settings.paymentMethodsConfig = originalPaymentMethods;
+      saveTenantAppState(restaurant.businessId, restStateAfter);
 
       if (hasInRest && !hasInCafe) {
         updated[3].status = 'PASSED';
@@ -243,9 +252,10 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
       const restState = loadTenantAppState(restaurant.businessId);
       const resortStateBefore = loadTenantAppState(resort.businessId);
 
+      const originalRestVat = restState.settings.vatRatePercent;
       const originalResortVat = resortStateBefore.settings.vatRatePercent;
 
-      // Alter restaurant tax rate
+      // Alter restaurant tax rate temporarily
       restState.settings.vatRatePercent = 18.5;
       saveTenantAppState(restaurant.businessId, restState);
 
@@ -253,7 +263,13 @@ export const BusinessDataIsolationTestModal: React.FC<BusinessDataIsolationTestM
       const resortStateAfter = loadTenantAppState(resort.businessId);
       const restStateAfter = loadTenantAppState(restaurant.businessId);
 
-      if (restStateAfter.settings.vatRatePercent === 18.5 && resortStateAfter.settings.vatRatePercent === originalResortVat) {
+      const passedTaxIso = restStateAfter.settings.vatRatePercent === 18.5 && resortStateAfter.settings.vatRatePercent === originalResortVat;
+
+      // Restore original VAT rate
+      restStateAfter.settings.vatRatePercent = originalRestVat;
+      saveTenantAppState(restaurant.businessId, restStateAfter);
+
+      if (passedTaxIso) {
         updated[4].status = 'PASSED';
         updated[4].log = `Verified: Restaurant VAT updated to 18.5%. Resort VAT remains at original ${originalResortVat}%. Zero data leakage.`;
       } else {

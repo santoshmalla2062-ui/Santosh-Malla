@@ -50,8 +50,7 @@ import {
   saveTenantAppState, 
   updateBusiness,
   deleteBusiness,
-  upsertSyncedCloudBusinesses,
-  INITIAL_BUSINESS_TENANTS 
+  upsertSyncedCloudBusinesses
 } from './services/tenantStorage';
 import { 
   canActorAssignRole,
@@ -75,6 +74,7 @@ import {
 import {
   ALL_SYNC_CHANNELS,
   CloudAccessResolution,
+  DEFAULT_WORKSPACE_CANDIDATES,
   SyncChannelId,
   backfillShardedSubcollections,
   bootstrapMasterOwnerWorkspace,
@@ -84,6 +84,7 @@ import {
   extractChannelPayload,
   fetchOlderShardedOrdersPage,
   getStaffAccountSyncFingerprint,
+  isChannelPayloadMeaningful,
   isMasterOwnerEmail,
   isMasterOwnerUser,
   isValidFirestoreId,
@@ -135,6 +136,7 @@ import {
   enqueueOfflineDraft,
   broadcastSyncEvent,
   flushOfflineQueue,
+  clearOfflineQueue,
   clearSensitiveCachesOnLogout
 } from './services/syncService';
 import { ActiveTab, SidebarNavigation } from './components/SidebarNavigation';
@@ -157,7 +159,13 @@ import { NotificationDrawerModal } from './components/common/NotificationDrawerM
 import { OfflineIndicator } from './components/common/PWAInstallButton';
 import { AppDownloadModal } from './components/common/AppDownloadModal';
 import { MobileAccessQRModal } from './components/common/MobileAccessQRModal';
-import { isDownloadRouteRequested } from './utils/distribution';
+import { DigitalMenuQRModal } from './components/menu/DigitalMenuQRModal';
+import { CustomerMenuView } from './components/menu/CustomerMenuView';
+import {
+  decodeCompactMenuPayload,
+  isDigitalMenuRouteRequested,
+  isDownloadRouteRequested
+} from './utils/distribution';
 import { sanitizeBusinessLogoUrl } from './utils/imageUtils';
 import { LoginModal } from './components/auth/LoginModal';
 import { AuditLogModal } from './components/audit/AuditLogModal';
@@ -165,7 +173,6 @@ import { BusinessSwitcherModal } from './components/tenant/BusinessSwitcherModal
 import { RegisterBusinessModal } from './components/tenant/RegisterBusinessModal';
 import { SuperAdminBusinessManagerModal } from './components/tenant/SuperAdminBusinessManagerModal';
 import { BusinessSetupWizardModal } from './components/admin/BusinessSetupWizardModal';
-import { SyncResilienceTestModal } from './components/admin/SyncResilienceTestModal';
 import { ShieldAlert, X } from 'lucide-react';
 
 export default function App() {
@@ -223,7 +230,10 @@ export default function App() {
   const [showSuperAdminModal, setShowSuperAdminModal] = useState<boolean>(false);
   const [showSetupWizardModal, setShowSetupWizardModal] = useState<boolean>(false);
 
-  const activeBusiness = businesses.find(b => b.businessId === activeBusinessId) || businesses[0] || INITIAL_BUSINESS_TENANTS[0];
+  const activeBusiness =
+    businesses.find(b => b.businessId === activeBusinessId) ||
+    businesses[0] ||
+    getRegisteredBusinesses()[0];
 
   // Load state from local storage or defaults for the active enterprise
   const [appState, setAppState] = useState<AppState>(() => loadTenantAppState(activeBusinessId));
@@ -239,7 +249,7 @@ export default function App() {
     return 'dashboard';
   });
   const [adminInitialTab, setAdminInitialTab] = useState<any>('dashboard');
-  const [selectedTableForPOS, setSelectedTableForPOS] = useState<string>('tr-1');
+  const [selectedTableForPOS, setSelectedTableForPOS] = useState<string>('');
   const [posNavigationNonce, setPosNavigationNonce] = useState<number>(0);
   const [pendingCheckoutOrderId, setPendingCheckoutOrderId] = useState<string | null>(null);
   const [pendingEditOrderId, setPendingEditOrderId] = useState<string | null>(null);
@@ -291,7 +301,46 @@ export default function App() {
     isDownloadRouteRequested(window.location.search, window.location.pathname)
   );
   const [showMobileQRModal, setShowMobileQRModal] = useState<boolean>(false);
+  const [showDigitalMenuQRModal, setShowDigitalMenuQRModal] = useState<boolean>(false);
+  const [showDigitalMenuView, setShowDigitalMenuView] = useState<boolean>(() =>
+    typeof window !== 'undefined' && isDigitalMenuRouteRequested(window.location.search)
+  );
+  const [isDigitalMenuPreview, setIsDigitalMenuPreview] = useState<boolean>(false);
+  const [digitalMenuTableName, setDigitalMenuTableName] = useState<string | undefined>(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      return new URLSearchParams(window.location.search).get('table')?.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const [decodedDigitalMenu] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const mParam = new URLSearchParams(window.location.search).get('m');
+      return decodeCompactMenuPayload(mParam);
+    } catch {
+      return null;
+    }
+  });
   const [showAuditLogModal, setShowAuditLogModal] = useState<boolean>(false);
+
+  const handleCloseDigitalMenuView = useCallback(() => {
+    setShowDigitalMenuView(false);
+    setIsDigitalMenuPreview(false);
+    if (typeof window !== 'undefined' && isDigitalMenuRouteRequested(window.location.search)) {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('menu');
+        url.searchParams.delete('table');
+        url.searchParams.delete('m');
+        const cleanedQuery = url.searchParams.toString();
+        window.history.replaceState({}, '', `${url.pathname}${cleanedQuery ? `?${cleanedQuery}` : ''}`);
+      } catch {
+        // Ignore history restriction in embedded environments
+      }
+    }
+  }, []);
 
   const handleCloseDownloadPortal = useCallback(() => {
     setShowDownloadPortal(false);
@@ -310,7 +359,6 @@ export default function App() {
       }
     }
   }, []);
-  const [showSyncTestModal, setShowSyncTestModal] = useState<boolean>(false);
   const [securityAlert, setSecurityAlert] = useState<string | null>(null);
   const [showQuickActionsModal, setShowQuickActionsModal] = useState<boolean>(false);
   const [showNotificationsDrawer, setShowNotificationsDrawer] = useState<boolean>(false);
@@ -328,6 +376,7 @@ export default function App() {
   const canPushCloudChannelsRef = useRef<boolean>(false);
   const channelFingerprintRef = useRef<Partial<Record<SyncChannelId, string>>>({});
   const channelRevisionRef = useRef<Partial<Record<SyncChannelId, number>>>({});
+  const cloudExistingChannelsRef = useRef<Set<SyncChannelId>>(new Set());
   const cloudUnsubscribeRef = useRef<(() => void) | null>(null);
   const explicitGoogleSignInRef = useRef<boolean>(false);
   const oldestShardedOrderCursorRef = useRef<number | null>(null);
@@ -852,6 +901,7 @@ export default function App() {
     }
     canPushCloudChannelsRef.current = false;
     channelFingerprintRef.current = {};
+    cloudExistingChannelsRef.current = new Set();
     oldestShardedOrderCursorRef.current = null;
     setHasMoreCloudOrders(false);
     cloudOrderIdsRef.current = new Set();
@@ -878,7 +928,7 @@ export default function App() {
         const candidateBizIds = Array.from(
           new Set([
             ...businesses.map((b) => b.businessId),
-            ...INITIAL_BUSINESS_TENANTS.map((b) => b.businessId)
+            ...DEFAULT_WORKSPACE_CANDIDATES
           ])
         );
         const res = await resolveCloudMemberAccess(firebaseUser, activeBusiness.businessId, {
@@ -945,6 +995,7 @@ export default function App() {
             setAppState((prev) => {
               let merged = { ...prev };
               for (const [chId, chData] of channelEntries) {
+                cloudExistingChannelsRef.current.add(chId);
                 merged = mergeChannelPayloadIntoAppState(merged, chId, chData);
                 const normalized = extractChannelPayload(chId, merged);
                 channelFingerprintRef.current[chId] = JSON.stringify(normalized);
@@ -1045,6 +1096,7 @@ export default function App() {
           effectiveRole: userIsOwnerOrMaster ? 'OWNER' : res.role,
           isOwnerOrMaster: userIsOwnerOrMaster,
           onChannelSnapshot: (channelId, data) => {
+            cloudExistingChannelsRef.current.add(channelId);
             isApplyingRemoteSyncRef.current = true;
             setAppState((prev) => {
               const merged = mergeChannelPayloadIntoAppState(prev, channelId, data);
@@ -1333,6 +1385,10 @@ export default function App() {
           continue;
         }
         const payload = extractChannelPayload(channelId, appState);
+        const meaningful = isChannelPayloadMeaningful(channelId, payload);
+        if (!meaningful && !cloudExistingChannelsRef.current.has(channelId)) {
+          continue;
+        }
         const fingerprint = JSON.stringify(payload);
         if (fingerprint === channelFingerprintRef.current[channelId]) {
           continue;
@@ -1349,9 +1405,13 @@ export default function App() {
           userUid: firebaseUser.uid,
           revision: nextRev,
           data: payload
-        }).catch((err) => {
-          console.error(`Cloud channel push failed (${channelId}):`, err);
-        });
+        })
+          .then(() => {
+            cloudExistingChannelsRef.current.add(channelId);
+          })
+          .catch((err) => {
+            console.error(`Cloud channel push failed (${channelId}):`, err);
+          });
       }
     }, 450);
 
@@ -2635,12 +2695,17 @@ export default function App() {
 
   // Safe Offline Queue Flush Handler
   const handleFlushOfflineQueue = useCallback(() => {
-    const res = flushOfflineQueue(activeBusiness.businessId, (draftOrder: Order) => {
+    let realProcessedCount = 0;
+    flushOfflineQueue(activeBusiness.businessId, (draftOrder: Order) => {
+      if (draftOrder?.id?.startsWith('ord-offline-') || draftOrder?.invoiceNo === 'INV-DRAFT-01') {
+        return { success: true };
+      }
       handleSaveOrder(draftOrder, false, 'occupied');
+      realProcessedCount++;
       return { success: true };
     });
-    if (res.processedCount > 0) {
-      recordAudit('OFFLINE_QUEUE_FLUSHED', activeBusiness.businessId, `Synchronized ${res.processedCount} offline draft orders`, 'INFO');
+    if (realProcessedCount > 0) {
+      recordAudit('OFFLINE_QUEUE_FLUSHED', activeBusiness.businessId, `Synchronized ${realProcessedCount} offline draft orders`, 'INFO');
       playChime('success');
     }
   }, [activeBusiness.businessId, recordAudit, playChime]);
@@ -3944,23 +4009,12 @@ export default function App() {
       return;
     }
 
+    clearOfflineQueue(activeBusiness.businessId);
     const baseClean = getCleanStarterState(appStateRef.current.settings, appStateRef.current.staffUsers);
     const freshState: AppState = {
       ...baseClean,
       businessId: activeBusiness.businessId,
-      auditLogs: [
-        {
-          id: 'audit-reset-' + Date.now(),
-          businessId: activeBusiness.businessId,
-          staffId: currentSession?.staffId || 'admin',
-          staffName: currentSession?.name || 'Administrator',
-          role: currentSession?.role || 'OWNER',
-          action: 'DEMO_DATA_CLEARED',
-          details: 'Cleared all demo records and reset to a clean production state.',
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          severity: 'INFO'
-        }
-      ]
+      auditLogs: []
     };
     setAppState(freshState);
     saveAppState(freshState);
@@ -4046,6 +4100,20 @@ export default function App() {
     }));
   };
 
+  if (showDigitalMenuView) {
+    return (
+      <CustomerMenuView
+        settings={appState.settings}
+        menuItems={appState.menuItems}
+        decodedPayload={decodedDigitalMenu}
+        tableName={digitalMenuTableName}
+        lang={language}
+        isPreviewMode={isDigitalMenuPreview}
+        onExitMenu={handleCloseDigitalMenuView}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex bg-slate-100 text-slate-900 selection:bg-orange-100 selection:text-orange-900 overflow-x-hidden">
       {/* Left Foodmandu Restro Vertical Dock Sidebar Navigation */}
@@ -4116,7 +4184,6 @@ export default function App() {
             setShowLoginModal(true);
           }}
           onOpenAuditLogs={() => setShowAuditLogModal(true)}
-          onOpenSyncDetails={() => setShowSyncTestModal(true)}
           onFlushQueue={handleFlushOfflineQueue}
           lowStockCount={lowStockCount}
           activeOrdersCount={activeOrdersCount}
@@ -4322,6 +4389,7 @@ export default function App() {
             onVoidOrderItem={handleVoidOrderItem}
             onAdminUpdatePricing={handleAdminUpdatePricing}
             onForceReleaseTable={handleForceReleaseTable}
+            onOpenDigitalMenuQR={() => setShowDigitalMenuQRModal(true)}
           />
         )}
 
@@ -4629,15 +4697,6 @@ export default function App() {
         blockedReason={businessCreationEligibility.reason}
       />
 
-      {/* Real-Time Sync & Offline Resilience Suite Modal */}
-      <SyncResilienceTestModal
-        isOpen={showSyncTestModal}
-        onClose={() => setShowSyncTestModal(false)}
-        activeBusinessId={activeBusiness.businessId}
-        appState={appState}
-        onApplySyncOrder={(draft) => handleSaveOrder(draft, false, 'occupied')}
-      />
-
       {/* Universal Smart Search & Quick Actions Modal */}
       <QuickActionsModal
         isOpen={showQuickActionsModal}
@@ -4652,10 +4711,6 @@ export default function App() {
         }}
         onOpenAuditLogs={() => {
           setShowAuditLogModal(true);
-          setShowQuickActionsModal(false);
-        }}
-        onOpenSyncDetails={() => {
-          setShowSyncTestModal(true);
           setShowQuickActionsModal(false);
         }}
         onOpenMobileQR={() => setShowMobileQRModal(true)}
@@ -4697,6 +4752,21 @@ export default function App() {
           }))
         }
         onOpenDownloadPortal={() => setShowDownloadPortal(true)}
+      />
+      <DigitalMenuQRModal
+        isOpen={showDigitalMenuQRModal}
+        onClose={() => setShowDigitalMenuQRModal(false)}
+        businessId={activeBusiness.businessId}
+        settings={appState.settings}
+        menuItems={appState.menuItems}
+        tablesRooms={appState.tablesRooms}
+        lang={language}
+        onPreviewMenu={(tbl) => {
+          setShowDigitalMenuQRModal(false);
+          setDigitalMenuTableName(tbl);
+          setIsDigitalMenuPreview(true);
+          setShowDigitalMenuView(true);
+        }}
       />
       <NotificationDrawerModal
         isOpen={showNotificationsDrawer}

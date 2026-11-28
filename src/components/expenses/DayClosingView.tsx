@@ -9,7 +9,11 @@ import {
   AlertCircle, 
   FileText, 
   X,
-  History
+  History,
+  Printer,
+  MessageCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 import { BusinessSettings, DayClosingRecord, Expense, ExpenseCategory, HotelPaymentRecord, KhataTransaction, Order, Session } from '../../types';
 import { Language } from '../../utils/translations';
@@ -47,6 +51,8 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
   const canPerformDayClose = !userRole || hasPermission(userRole, 'PERFORM_DAY_CLOSE');
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'closing' | 'expenses' | 'history'>('closing');
+  const [handoverSlipTarget, setHandoverSlipTarget] = useState<DayClosingRecord | null>(null);
+  const [slipCopied, setSlipCopied] = useState(false);
 
   // New Expense modal
   const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -189,6 +195,50 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
     };
 
     onSaveDayClosing(record);
+    setHandoverSlipTarget(record);
+  };
+
+  const buildLiveShiftDraft = (): DayClosingRecord => ({
+    id: 'shift-preview',
+    date: new Date().toISOString().split('T')[0],
+    openingCash,
+    totalCashSales: totalCashSalesToday,
+    totalDigitalSales: totalDigitalSalesToday,
+    totalCreditSales: totalCreditSalesToday,
+    totalExpenses: totalCashExpensesToday,
+    expectedCashInDrawer: expectedCash,
+    actualCashInDrawer: actualCashCounted,
+    discrepancy: cashDiscrepancy,
+    closedAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    notes: closingNotes.trim() || undefined
+  });
+
+  const formatShiftSlipText = (dc: DayClosingRecord): string => {
+    const cur = settings.currencySymbol || 'Rs.';
+    const gross = (dc.totalCashSales || 0) + (dc.totalDigitalSales || 0) + (dc.totalCreditSales || 0);
+    const staffLine = currentSession?.name
+      ? `${currentSession.name} (${currentSession.role})`
+      : 'Counter Cashier';
+    return [
+      `*${(settings.businessName || 'CAFE HOST').trim()}*`,
+      `*SHIFT HANDOVER SLIP*`,
+      `Date: ${dc.date} (${dc.closedAt})`,
+      `Staff: ${staffLine}`,
+      '------------------------------',
+      `Opening Float:     ${cur} ${dc.openingCash.toLocaleString()}`,
+      `Cash Sales:        ${cur} ${dc.totalCashSales.toLocaleString()}`,
+      `Digital / QR:      ${cur} ${dc.totalDigitalSales.toLocaleString()}`,
+      `Khata Credit:      ${cur} ${dc.totalCreditSales.toLocaleString()}`,
+      `Cash Expenses:    -${cur} ${dc.totalExpenses.toLocaleString()}`,
+      '------------------------------',
+      `Expected Cash:     ${cur} ${dc.expectedCashInDrawer.toLocaleString()}`,
+      `*Actual Counted:   ${cur} ${dc.actualCashInDrawer.toLocaleString()}*`,
+      `Discrepancy:       ${dc.discrepancy >= 0 ? '+' : ''}${cur} ${dc.discrepancy.toLocaleString()}`,
+      `Gross Business:    ${cur} ${gross.toLocaleString()}`,
+      dc.notes ? `Notes: ${dc.notes}` : ''
+    ]
+      .filter(Boolean)
+      .join('\n');
   };
 
   return (
@@ -396,14 +446,24 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                 className="w-full text-xs p-2.5 border border-slate-300 rounded-lg"
               />
 
-              <button
-                type="button"
-                onClick={handleConfirmDayClosing}
-                className="w-full py-3 px-4 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-2"
-              >
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                <span>{lang === 'ne' ? 'आजको दिन बन्द गर्नुहोस् (Confirm Day Close)' : 'Finalize & Record Day Close'}</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHandoverSlipTarget(buildLiveShiftDraft())}
+                  className="w-full py-2.5 px-3 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>{lang === 'ne' ? 'शिफ्ट ह्यान्डओभर स्लिप' : 'Shift Handover Slip'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDayClosing}
+                  className="w-full py-2.5 px-3 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  <span>{lang === 'ne' ? 'दिन बन्द गर्नुहोस्' : 'Confirm Day Close'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -483,6 +543,7 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                   <th className="py-3 px-4 text-right">Counted Cash</th>
                   <th className="py-3 px-4 text-right">Discrepancy</th>
                   <th className="py-3 px-4">Notes</th>
+                  <th className="py-3 px-4 text-right">Slip</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -513,6 +574,16 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-slate-500">
                       {dc.notes || '-'}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setHandoverSlipTarget(dc)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span>Slip</span>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -633,6 +704,144 @@ export const DayClosingView: React.FC<DayClosingViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Shift Handover Slip Modal */}
+      {handoverSlipTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 print:static print:inset-auto print:bg-white print:p-0">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:border-none">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 print:hidden">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-slate-700" />
+                <h3 className="font-bold text-slate-900 text-sm">
+                  {lang === 'ne' ? 'शिफ्ट ह्यान्डओभर स्लिप' : 'Shift Handover Slip'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHandoverSlipTarget(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 bg-slate-100/70 overflow-y-auto flex justify-center print:bg-white print:p-0">
+              <div className="w-[78mm] bg-white text-black font-mono text-xs p-4 border border-slate-300 shadow-xs space-y-2 print:border-none print:shadow-none">
+                <div className="text-center border-b border-dashed border-slate-400 pb-2">
+                  <p className="font-black text-sm uppercase">{settings.businessName || 'CAFE HOST'}</p>
+                  <p className="text-[11px] font-bold mt-0.5">SHIFT HANDOVER SLIP</p>
+                  <p className="text-[10px] text-slate-600">{handoverSlipTarget.closedAt}</p>
+                </div>
+
+                <div className="space-y-1 text-[11px] border-b border-dashed border-slate-400 pb-2">
+                  <div className="flex justify-between">
+                    <span>Date:</span>
+                    <span className="font-semibold">{handoverSlipTarget.date}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Cashier / Staff:</span>
+                    <span className="font-semibold">
+                      {currentSession?.name ? `${currentSession.name}` : 'Counter Cashier'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-[11px] border-b border-dashed border-slate-400 pb-2">
+                  <div className="flex justify-between">
+                    <span>Opening Float:</span>
+                    <span>{settings.currencySymbol} {handoverSlipTarget.openingCash.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Cash Sales:</span>
+                    <span>+{settings.currencySymbol} {handoverSlipTarget.totalCashSales.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Digital / QR Sales:</span>
+                    <span>{settings.currencySymbol} {handoverSlipTarget.totalDigitalSales.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Khata Credit:</span>
+                    <span>{settings.currencySymbol} {handoverSlipTarget.totalCreditSales.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Cash Expenses:</span>
+                    <span>-{settings.currencySymbol} {handoverSlipTarget.totalExpenses.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-[11px] border-b border-dashed border-slate-400 pb-2">
+                  <div className="flex justify-between">
+                    <span>Expected Drawer:</span>
+                    <span>{settings.currencySymbol} {handoverSlipTarget.expectedCashInDrawer.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between font-black text-xs">
+                    <span>ACTUAL COUNTED:</span>
+                    <span>{settings.currencySymbol} {handoverSlipTarget.actualCashInDrawer.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between font-bold">
+                    <span>Over / Short:</span>
+                    <span>
+                      {handoverSlipTarget.discrepancy >= 0 ? '+' : ''}
+                      {settings.currencySymbol} {handoverSlipTarget.discrepancy.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {handoverSlipTarget.notes && (
+                  <p className="text-[10px] text-slate-700 italic">Note: {handoverSlipTarget.notes}</p>
+                )}
+
+                <div className="pt-4 flex justify-between text-[10px] text-slate-600">
+                  <span>Handover Sign: _______</span>
+                  <span>Receiver Sign: _______</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 border-t border-slate-200 bg-white flex flex-wrap items-center justify-between gap-2 print:hidden">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(formatShiftSlipText(handoverSlipTarget));
+                        setSlipCopied(true);
+                        setTimeout(() => setSlipCopied(false), 2000);
+                      }
+                    } catch {
+                      // Ignore clipboard restriction
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  {slipCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  <span>{slipCopied ? 'Copied' : 'Copy'}</span>
+                </button>
+
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(formatShiftSlipText(handoverSlipTarget))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
+                >
+                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>WhatsApp</span>
+                </a>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-black rounded-lg transition-colors"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>{lang === 'ne' ? 'स्लिप प्रिन्ट' : 'Print Slip'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

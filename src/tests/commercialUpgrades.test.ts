@@ -439,7 +439,7 @@ test('Multi-Device Firestore Scaling keeps orders_live bounded < 1 MB and retain
   const payload = extractChannelPayload('orders_live', state);
 
   assert.ok(Array.isArray(payload.orders));
-  assert.equal(payload.orders.length, 60, '10 active + max 50 recent archived in bounded orders_live doc');
+  assert.equal(payload.orders.length, 40, '10 active + max 30 recent archived in bounded orders_live doc');
   const serializedSizeBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
   assert.ok(serializedSizeBytes < 200_000, `Expected bounded payload << 1MB, got ${serializedSizeBytes} bytes`);
 

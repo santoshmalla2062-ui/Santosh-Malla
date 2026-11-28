@@ -206,7 +206,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Selected Table/Room
   const [selectedTableRoomId, setSelectedTableRoomId] = useState<string>(
-    initialSelectedTableId || diningTables[0]?.id || 'tr-1'
+    initialSelectedTableId || diningTables[0]?.id || ''
   );
 
   // Waiter assignment from actual business staff roster
@@ -214,15 +214,10 @@ export const POSView: React.FC<POSViewProps> = ({
     const fromStaff = staffUsers
       .filter(s => s.isActive && (s.role === 'WAITER' || s.role === 'STAFF' || s.role === 'CASHIER' || s.role === 'MANAGER' || s.role === 'ADMIN' || s.role === 'OWNER'))
       .map(s => s.nepaliName ? `${s.name} (${s.nepaliName})` : s.name);
-    return fromStaff.length > 0 ? fromStaff : [
-      'Bikash Tamang (Waiter)',
-      'Pooja Sharma (Cafe Server)',
-      'Sunil Gurung (Terrace Waiter)',
-      'Aashish Thapa (Captain)'
-    ];
+    return fromStaff.length > 0 ? fromStaff : ['Staff'];
   }, [staffUsers]);
 
-  const [selectedWaiter, setSelectedWaiter] = useState<string>(availableWaiters[0] || 'Waiter');
+  const [selectedWaiter, setSelectedWaiter] = useState<string>(availableWaiters[0] || 'Staff');
 
   useEffect(() => {
     if (!availableWaiters.includes(selectedWaiter) && availableWaiters.length > 0) {
@@ -834,8 +829,8 @@ export const POSView: React.FC<POSViewProps> = ({
     id: currentOrderId || activeOrderForTable?.id || ('ord-' + Date.now()),
     invoiceNo: activeOrMatchedOrder?.invoiceNo || nextSequentialInvoice,
     kotNo: activeOrMatchedOrder?.kotNo || nextSequentialKOT,
-    tableRoomId: orderType === 'dine_in' ? (selectedTableRoom?.id || 'tr-1') : (orderType === 'takeaway' ? 'tr-tk' : 'tr-del'),
-    tableRoomName: orderType === 'dine_in' ? (selectedTableRoom?.name || 'Table 1') : (orderType === 'takeaway' ? 'Takeaway Counter' : `Delivery (${deliveryCustName || 'Pending'})`),
+    tableRoomId: orderType === 'dine_in' ? (selectedTableRoom?.id || '') : (orderType === 'takeaway' ? 'tr-tk' : 'tr-del'),
+    tableRoomName: orderType === 'dine_in' ? (selectedTableRoom?.name || 'Counter') : (orderType === 'takeaway' ? 'Takeaway Counter' : `Delivery (${deliveryCustName || 'Pending'})`),
     tableRoomType: orderType === 'dine_in' ? (selectedTableRoom?.type || 'table') : 'takeaway',
     orderType: orderType === 'dine_in' ? 'dine_in' : orderType === 'takeaway' ? 'takeaway' : 'delivery',
     items: cartItems,

@@ -3,6 +3,7 @@ import {
   Check,
   Copy,
   Download,
+  MessageCircle,
   Printer,
   ReceiptText,
   Usb,
@@ -15,6 +16,7 @@ import { formatReceiptNepaliDate } from '../../utils/nepaliCalendar';
 import { parseOrderDate } from '../../utils/timeUtils';
 import {
   buildReceiptPaymentRows,
+  buildWhatsAppBillUrl,
   formatPlainTextReceipt,
   getEffectiveServicePercent,
   getReceiptAttribution,
@@ -125,6 +127,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       billType,
       displayDateStr
     });
+
+  const whatsappBillUrl = buildWhatsAppBillUrl({
+    order,
+    settings,
+    billType,
+    displayDateStr
+  });
 
   const handleDownloadReceipt = () => {
     const textReceipt = generatePlainTextReceipt();
@@ -555,6 +564,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
               <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
             </button>
+
+            <a
+              href={whatsappBillUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors whitespace-nowrap"
+              title={
+                order.customerPhone
+                  ? `Share bill on WhatsApp (${order.customerPhone})`
+                  : 'Share bill on WhatsApp'
+              }
+            >
+              <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">WhatsApp</span>
+            </a>
 
             <button
               type="button"

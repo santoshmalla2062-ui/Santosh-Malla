@@ -48,9 +48,7 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [panVatNumber, setPanVatNumber] = useState('');
-  const [logo, setLogo] = useState('');
-  const [environment, setEnvironment] = useState<'production' | 'demo'>('production');
-  const [templateType, setTemplateType] = useState<'clean_slate' | 'starter'>('clean_slate');
+  const [logo] = useState('');
   const [enabledModules, setEnabledModules] = useState<AppModule[]>(DEFAULT_MODULES_BY_TYPE.CAFE);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,15 +123,15 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
         tagline: tagline.trim() || undefined,
         businessType,
         phone: phone.trim(),
-        email: email.trim() || 'contact@' + businessName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.com',
+        email: email.trim(),
         address: address.trim(),
-        panVatNumber: panVatNumber.trim() || '600000000',
+        panVatNumber: panVatNumber.trim(),
         logo: logo.trim() || undefined,
         ownerId: currentUser?.id || 'owner-' + Date.now().toString(36),
         ownerName: currentUser?.name || 'Business Owner',
         enabledModules,
-        environment,
-        templateType,
+        environment: 'production',
+        templateType: 'clean_slate',
         enforceSingleBusinessCap: true,
         actorRole: currentUser?.role || 'OWNER',
         isMasterOwner
@@ -347,98 +345,10 @@ export const RegisterBusinessModal: React.FC<RegisterBusinessModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Environment & Initial Catalog */}
-          <div className="space-y-3 pt-2 border-t border-slate-100">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">3. Workspace Environment & Catalog Setup</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Environment Choice */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700">Environment Mode</label>
-                <div className="space-y-1.5">
-                  <div 
-                    onClick={() => setEnvironment('production')}
-                    className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                      environment === 'production' 
-                        ? 'border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500' 
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-                        Live Production
-                      </span>
-                      {environment === 'production' && <Check className="h-3.5 w-3.5 text-emerald-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Real daily business operations and official tax ledger.</p>
-                  </div>
-
-                  <div 
-                    onClick={() => setEnvironment('demo')}
-                    className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                      environment === 'demo' 
-                        ? 'border-amber-500 bg-amber-50/50 ring-1 ring-amber-500' 
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-                        Demo / Training Sandbox
-                      </span>
-                      {environment === 'demo' && <Check className="h-3.5 w-3.5 text-amber-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Safe environment for staff onboarding and practice.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Initial Catalog Template */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700">Initial Data Catalog</label>
-                <div className="space-y-1.5">
-                  <div 
-                    onClick={() => setTemplateType('clean_slate')}
-                    className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                      templateType === 'clean_slate' 
-                        ? 'border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500' 
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        ✨ Clean Slate (Empty)
-                      </span>
-                      {templateType === 'clean_slate' && <Check className="h-3.5 w-3.5 text-emerald-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Recommended: Start fresh with empty dishes, tables & inventory.</p>
-                  </div>
-
-                  <div 
-                    onClick={() => setTemplateType('starter')}
-                    className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                      templateType === 'starter' 
-                        ? 'border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500' 
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        📋 Starter Template
-                      </span>
-                      {templateType === 'starter' && <Check className="h-3.5 w-3.5 text-indigo-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Pre-load standard sample menu dishes and floor tables.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 4: Enabled Modules Configuration */}
+          {/* Section 3: Enabled Modules Configuration */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">4. Enabled Software Modules</h3>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">3. Enabled Software Modules</h3>
               <span className="text-[11px] text-slate-500 font-medium">
                 {enabledModules.length} selected
               </span>

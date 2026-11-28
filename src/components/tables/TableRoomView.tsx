@@ -31,7 +31,8 @@ import {
   Truck,
   ArrowRight,
   Check,
-  SlidersHorizontal
+  SlidersHorizontal,
+  QrCode
 } from 'lucide-react';
 import { BusinessSettings, Order, Session, TableRoom, TableRoomStatus, TableRoomType } from '../../types';
 import { Language, TRANSLATIONS } from '../../utils/translations';
@@ -69,6 +70,7 @@ interface TableRoomViewProps {
   onVoidOrderItem?: (orderId: string, itemIndex: number, reason: string) => void;
   onAdminUpdatePricing?: (orderId: string, update: { discountPercent?: number; waiveServiceCharge?: boolean; waiveVat?: boolean; notes?: string }) => void;
   onForceReleaseTable?: (tableId: string) => void;
+  onOpenDigitalMenuQR?: () => void;
 }
 
 export const TableRoomView: React.FC<TableRoomViewProps> = ({
@@ -92,7 +94,8 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
   onVoidOrder,
   onVoidOrderItem,
   onAdminUpdatePricing,
-  onForceReleaseTable
+  onForceReleaseTable,
+  onOpenDigitalMenuQR
 }) => {
   const t = TRANSLATIONS[lang];
   const userRole = currentSession?.role;
@@ -495,6 +498,18 @@ export const TableRoomView: React.FC<TableRoomViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onOpenDigitalMenuQR && (
+              <button
+                type="button"
+                onClick={onOpenDigitalMenuQR}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-colors whitespace-nowrap min-h-[40px]"
+                title={lang === 'ne' ? 'टेबल QR डिजिटल मेनु' : 'Table QR Digital Menu'}
+              >
+                <QrCode className="h-3.5 w-3.5 text-slate-700" />
+                <span>{lang === 'ne' ? 'QR मेनु' : 'QR Menu'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setShowActiveOrdersModal(true)}

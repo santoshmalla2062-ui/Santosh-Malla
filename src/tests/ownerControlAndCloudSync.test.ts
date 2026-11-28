@@ -10,6 +10,7 @@ import {
   redactProtectedEmail,
   canFreeSwitchRoles,
   getVisibleDemoPinRoles,
+  isChannelPayloadMeaningful,
   canRoleReadChannel,
   canRoleWriteChannel,
   sanitizeForFirestore,
@@ -23,7 +24,7 @@ import {
 } from '../services/cloudSyncService';
 import { formatFirebaseAuthError } from '../firebase';
 import { getInitialAppState } from '../services/storage';
-import { upsertSyncedCloudBusinesses, getRegisteredBusinesses } from '../services/tenantStorage';
+import { upsertSyncedCloudBusinesses, getRegisteredBusinesses, updateBusiness } from '../services/tenantStorage';
 import { getCurrentSession, clearSession, hasPermission } from '../services/security';
 import { AppState, Order } from '../types';
 
@@ -32,6 +33,30 @@ function makeBaseState(): AppState {
   return {
     ...base,
     businessId: 'biz-himalayan-breeze',
+    menuItems: [
+      {
+        id: 'mi-seed-1',
+        code: 'CF-01',
+        name: 'Himalayan Espresso',
+        nepaliName: 'एस्प्रेसो',
+        category: 'coffee',
+        price: 150,
+        costPrice: 40,
+        isAvailable: true
+      }
+    ],
+    tablesRooms: [
+      {
+        id: 'tr-seed-1',
+        code: 'T-1',
+        name: 'Table 1',
+        nepaliName: 'टेबल १',
+        capacity: 4,
+        type: 'table',
+        area: 'Main Hall',
+        status: 'available'
+      }
+    ],
     settings: {
       ...base.settings,
       securitySettings: {
@@ -134,14 +159,9 @@ test('Privilege Escalation Defense: Terminal locks role switching and hides Owne
     false
   );
 
-  // Demo PIN shortcuts strictly gated when locked, and never expose OWNER/ADMIN/SUPER_ADMIN even when unlocked
+  // Demo PIN shortcuts must never be exposed in either locked or unlocked mode
   assert.deepStrictEqual(getVisibleDemoPinRoles(true), []);
-  const unlockedDemos = getVisibleDemoPinRoles(false);
-  assert.ok(unlockedDemos.length > 0);
-  const exposedRoles = unlockedDemos.map((d) => d.role);
-  assert.equal(exposedRoles.includes('OWNER'), false, 'OWNER PIN must NEVER be displayed on login screen');
-  assert.equal(exposedRoles.includes('ADMIN'), false, 'ADMIN PIN must NEVER be displayed on login screen');
-  assert.equal(exposedRoles.includes('SUPER_ADMIN'), false, 'SUPER_ADMIN PIN must NEVER be displayed on login screen');
+  assert.deepStrictEqual(getVisibleDemoPinRoles(false), []);
 });
 
 test('Role Channel Isolation & Waiter/Kitchen RBAC Alignment', () => {
@@ -222,8 +242,9 @@ test('Firestore Payload Sanitizer & Bounded Order Serialization', () => {
         quantity: 2,
         category: 'fast_food',
         station: 'main_kitchen',
-        kotStatus: 'sent_to_kitchen'
-      }
+        kotStatus: 'sent_to_kitchen',
+        imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+      } as any
     ],
     createdAt: new Date().toISOString()
   };
@@ -232,11 +253,31 @@ test('Firestore Payload Sanitizer & Bounded Order Serialization', () => {
   assert.strictEqual(newDoc.id, 'ord-test-001');
   assert.strictEqual(newDoc.discountPercent, 100);
   assert.strictEqual(newDoc.guestCount, 200);
+  assert.strictEqual('imageUrl' in newDoc.items[0], false, 'Order items must strip inline imageUrl to prevent Firestore bloat');
   assert.ok('createdAt' in newDoc, 'New order doc must include serverTimestamp createdAt');
   assert.ok('updatedAt' in newDoc, 'New order doc must include serverTimestamp updatedAt');
 
   const updateDoc = buildSanitizedOrderDocPayload(sampleOrder, 'biz-himalayan-breeze', 'owner-1', 'staff-1', false);
   assert.equal('createdAt' in updateDoc, false, 'Order update doc must not resend createdAt');
+
+  // Empty sync channel payloads must be skipped on bootstrap/push to avoid empty Firestore docs
+  const emptyState = getInitialAppState();
+  assert.strictEqual(
+    isChannelPayloadMeaningful('orders_live', extractChannelPayload('orders_live', emptyState)),
+    false
+  );
+  assert.strictEqual(
+    isChannelPayloadMeaningful('resort_ops', extractChannelPayload('resort_ops', emptyState)),
+    false
+  );
+  assert.strictEqual(
+    isChannelPayloadMeaningful('inventory_ledger', extractChannelPayload('inventory_ledger', emptyState)),
+    false
+  );
+  assert.strictEqual(
+    isChannelPayloadMeaningful('menu_tables', extractChannelPayload('menu_tables', makeBaseState())),
+    true
+  );
 });
 
 test('Sync Channel Extraction & Round-Trip State Merge', () => {
@@ -389,6 +430,10 @@ test('App Creator Sync: SUPER_ADMIN verification, global role switching, and clo
   assert.strictEqual(hasPermission('OWNER', 'MANAGE_ALL_BUSINESSES'), false);
 
   // Cloud tenant upsert merges new remote tenants & updates existing status/modules without losing local fields
+  updateBusiness('biz-himalayan-breeze', {
+    phone: '+977 9800000001',
+    logo: '/pwa-192x192.png'
+  });
   const initialCount = getRegisteredBusinesses().length;
   const mergedAfterFirst = upsertSyncedCloudBusinesses([
     {
@@ -413,8 +458,8 @@ test('App Creator Sync: SUPER_ADMIN verification, global role switching, and clo
   assert.ok(existingUpdated);
   assert.strictEqual(existingUpdated.status, 'SUSPENDED');
   assert.deepStrictEqual(existingUpdated.enabledModules, ['pos', 'billing', 'settings']);
-  assert.ok(existingUpdated.phone && existingUpdated.phone.length > 0, 'Local phone must be preserved');
-  assert.ok(existingUpdated.logo && existingUpdated.logo.length > 0, 'Local logo must be preserved');
+  assert.strictEqual(existingUpdated.phone, '+977 9800000001', 'Local phone must be preserved');
+  assert.strictEqual(existingUpdated.logo, '/pwa-192x192.png', 'Local logo must be preserved');
 
   const insertedCloud = mergedAfterFirst.find((b) => b.businessId === 'biz-remote-client-101');
   assert.ok(insertedCloud);

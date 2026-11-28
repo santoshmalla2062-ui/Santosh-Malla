@@ -50,11 +50,14 @@ test('Clean Slate & Starter Business Registration: zero fake balances, reservati
     email: 'stay@mustanglodge.np',
     address: 'Jomsom, Mustang',
     ownerId: 'owner-mustang',
-    ownerName: 'Karma Thakali',
-    environment: 'production',
-    templateType: 'clean_slate'
+    ownerName: 'Karma Thakali'
   });
 
+  assert.strictEqual(cleanResort.business.environment, 'production', 'Default business environment must be production');
+  assert.strictEqual(cleanResort.business.templateType, 'clean_slate', 'Default business templateType must be clean_slate');
+  assert.strictEqual(cleanResort.state.orders.length, 0, 'Clean slate must start with zero orders');
+  assert.strictEqual(cleanResort.state.reservations.length, 0, 'Clean slate must start with zero reservations');
+  assert.strictEqual(cleanResort.state.auditLogs.length, 0, 'Clean slate must not seed synthetic BUSINESS_INITIALIZED audit logs');
   assert.strictEqual(cleanResort.state.guestFolioItems.length, 0, 'Clean slate resort must have empty guestFolioItems');
   assert.strictEqual(cleanResort.state.hotelPayments.length, 0, 'Clean slate resort must have empty hotelPayments');
   assert.strictEqual(cleanResort.state.resortServices.length, 0, 'Clean slate resort must have empty resortServices');
@@ -379,7 +382,18 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
   } = await import('../services/storage');
   const { isMasterOwnerEmail } = await import('../services/cloudSyncService');
 
+  assert.strictEqual(INITIAL_ORDERS.length, 0);
+  assert.strictEqual(INITIAL_CUSTOMERS.length, 0);
+  assert.strictEqual(INITIAL_RESERVATIONS.length, 0);
+  assert.strictEqual(INITIAL_GUEST_PROFILES.length, 0);
+  assert.strictEqual(INITIAL_GUEST_FOLIOS.length, 0);
+  assert.strictEqual(INITIAL_HOTEL_PAYMENTS.length, 0);
+
   const initial = getInitialAppState();
+  assert.strictEqual(initial.menuItems.length, 0);
+  assert.strictEqual(initial.tablesRooms.length, 0);
+  assert.strictEqual(initial.inventoryItems.length, 0);
+  assert.strictEqual(initial.resortRooms.length, 0);
   assert.strictEqual(initial.orders.length, 0);
   assert.strictEqual(initial.customers.length, 0);
   assert.strictEqual(initial.reservations.length, 0);
@@ -388,11 +402,11 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
   assert.strictEqual(initial.hotelPayments.length, 0);
   assert.strictEqual(initial.expenses.length, 0);
   assert.strictEqual(initial.dayClosings.length, 0);
+  assert.strictEqual(initial.auditLogs.length, 0);
   assert.strictEqual(initial.settings.hotelCheckInTime, '14:00');
   assert.strictEqual(initial.settings.hotelCheckOutTime, '12:00');
-  assert.ok(initial.resortRooms.every(r => r.status === 'AVAILABLE' && !r.currentGuestName));
 
-  // Scrubbing a state loaded with legacy demo constants removes demo records without erasing non-demo records
+  // Scrubbing a state loaded with legacy demo IDs removes demo records without erasing real user records
   const customOrder: Order = {
     id: 'ord-real-999',
     invoiceNo: 'INV-2026-9999',
@@ -417,12 +431,94 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
   };
   const legacyMixedState = {
     ...initial,
-    orders: [...INITIAL_ORDERS, customOrder],
-    customers: INITIAL_CUSTOMERS,
-    reservations: INITIAL_RESERVATIONS,
-    guestProfiles: INITIAL_GUEST_PROFILES,
-    guestFolioItems: INITIAL_GUEST_FOLIOS,
-    hotelPayments: INITIAL_HOTEL_PAYMENTS
+    orders: [
+      { ...customOrder, id: 'ord-active-1', invoiceNo: 'INV-2026-1042' },
+      customOrder
+    ],
+    customers: [
+      {
+        id: 'c-1',
+        name: 'Demo Customer',
+        phone: '9800000000',
+        customerType: 'regular' as const,
+        creditBalance: 500,
+        loyaltyPoints: 0,
+        totalSpend: 500,
+        totalVisits: 1,
+        createdAt: '2026-01-01'
+      }
+    ],
+    reservations: [
+      {
+        id: 'res-101',
+        guestId: 'gp-1',
+        guestName: 'Demo Guest',
+        guestPhone: '9800000000',
+        roomId: 'room-101',
+        roomNumber: '101',
+        roomTypeId: 'rt-1',
+        roomTypeName: 'Deluxe',
+        checkInDate: '2026-01-01',
+        checkOutDate: '2026-01-02',
+        nightsCount: 1,
+        adults: 1,
+        children: 0,
+        roomRate: 3000,
+        extraCharges: 0,
+        discountAmount: 0,
+        taxAmount: 0,
+        totalAmount: 3000,
+        depositAmount: 0,
+        paidAmount: 0,
+        remainingAmount: 3000,
+        paymentMethod: 'cash' as const,
+        status: 'CONFIRMED' as const,
+        bookingSource: 'Direct Walk-in' as const,
+        createdAt: '2026-01-01'
+      }
+    ],
+    guestProfiles: [
+      {
+        id: 'gp-1',
+        fullName: 'Demo Guest',
+        phone: '9800000000',
+        email: '',
+        address: 'Pokhara',
+        country: 'Nepal',
+        idType: 'Citizenship' as const,
+        idNumber: '0000',
+        totalStays: 1,
+        createdAt: '2026-01-01'
+      }
+    ],
+    guestFolioItems: [
+      {
+        id: 'fol-1',
+        reservationId: 'res-101',
+        roomId: 'room-101',
+        roomNumber: '101',
+        dateTime: '2026-01-01 12:00',
+        description: 'Legacy room charge',
+        category: 'ROOM' as const,
+        quantity: 1,
+        unitPrice: 3000,
+        totalPrice: 3000,
+        addedByStaff: 'Front Desk'
+      }
+    ],
+    hotelPayments: [
+      {
+        id: 'hp-1',
+        reservationId: 'res-101',
+        guestName: 'Demo Guest',
+        roomNumber: '101',
+        amount: 3000,
+        method: 'cash' as const,
+        staffName: 'Front Desk',
+        status: 'completed' as const,
+        dateTime: '2026-01-01 12:00'
+      }
+    ]
   };
 
   const { state: scrubbed, changed } = scrubLegacyDemoData(legacyMixedState);
@@ -438,6 +534,7 @@ test('Zero-Demo Clean Production Defaults, Legacy Demo Scrub & Master Email Mask
   const cleanReset = getCleanStarterState(initial.settings, initial.staffUsers);
   assert.strictEqual(cleanReset.orders.length, 0);
   assert.strictEqual(cleanReset.reservations.length, 0);
+  assert.strictEqual(cleanReset.auditLogs.length, 0);
 
   // Master Owner email detection (for masking / never auto-prefilling in LoginModal)
   const testMasterEmail = Buffer.from('c2FtamhhbW5hbWFsbGEyMjQ0NEBnbWFpbC5jb20=', 'base64').toString('utf8');

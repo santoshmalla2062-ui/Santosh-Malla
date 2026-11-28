@@ -12,7 +12,6 @@ import {
   BedDouble, 
   Tag, 
   Hotel,
-  ShieldCheck,
   Users,
   ArrowRightLeft,
   Clock
@@ -58,7 +57,6 @@ import { ResortServicesModal } from './ResortServicesModal';
 import { NightAuditModal } from './NightAuditModal';
 import { ResortReports } from './ResortReports';
 import { GuestProfilesView } from './GuestProfilesView';
-import { ResortWorkflowTestModal } from './ResortWorkflowTestModal';
 
 interface ResortMainViewProps {
   appState: AppState;
@@ -107,7 +105,6 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
   const [showNightAuditModal, setShowNightAuditModal] = useState(false);
   const [showRoomTypeModal, setShowRoomTypeModal] = useState(false);
   const [showServicesModal, setShowServicesModal] = useState(false);
-  const [showWorkflowTestModal, setShowWorkflowTestModal] = useState(false);
   const [showTimingsModal, setShowTimingsModal] = useState(false);
   const [defaultCheckInInput, setDefaultCheckInInput] = useState(settings.hotelCheckInTime || '14:00');
   const [defaultCheckOutInput, setDefaultCheckOutInput] = useState(settings.hotelCheckOutTime || '12:00');
@@ -1365,16 +1362,6 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           >
             <Moon className="h-3.5 w-3.5 text-indigo-300" /> Night Audit
           </button>
-          {(currentSession?.role === 'SUPER_ADMIN' || currentSession?.role === 'OWNER') && (
-            <button
-              type="button"
-              onClick={() => setShowWorkflowTestModal(true)}
-              className="inline-flex items-center gap-1 px-2 py-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0"
-              title="Resort Workflow Verification Suite"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" /> Audit Check
-            </button>
-          )}
         </div>
       </div>
 
@@ -1787,17 +1774,6 @@ export const ResortMainView: React.FC<ResortMainViewProps> = ({
           onReportIssue={handleReportMaintenanceIssue}
           onResolveIssue={handleResolveMaintenanceIssue}
           onClose={() => setMaintenanceRoomDetails(null)}
-        />
-      )}
-
-      {/* Resort Phase 4 Operational Verification Suite */}
-      {showWorkflowTestModal && (
-        <ResortWorkflowTestModal
-          isOpen={showWorkflowTestModal}
-          onClose={() => setShowWorkflowTestModal(false)}
-          activeBusiness={activeBusiness}
-          appState={appState}
-          currentSession={currentSession}
         />
       )}
 
