@@ -118,8 +118,8 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3.5">
               <img
-                src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
-                alt={businessName || 'CAFe Host'}
+                src={`${import.meta.env.BASE_URL}pwa-192x192.png?v=5`}
+                alt={businessName || 'CAFE HOST'}
                 referrerPolicy="no-referrer"
                 className="h-14 w-14 rounded-2xl border border-white/15 shadow-lg bg-slate-900 shrink-0"
               />
@@ -128,7 +128,7 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
                   {lang === 'ne' ? 'आधिकारिक मोबाइल र डेस्कटप एप' : 'Official POS & Resort App'}
                 </span>
                 <h1 className="text-lg sm:text-xl font-extrabold tracking-tight leading-snug text-white">
-                  {businessName || 'CAFe Host'}
+                  {businessName || 'CAFE HOST'}
                 </h1>
                 <p className="text-xs text-slate-300 mt-0.5">
                   {tagline ||
@@ -250,8 +250,8 @@ export const AppDownloadModal: React.FC<AppDownloadModalProps> = ({
               </a>
               <p className="text-[11px] text-center text-emerald-900">
                 {lang === 'ne'
-                  ? 'डाउनलोड भएपछि फाइल खोलेर "Install" थिच्नुहोस् (Unknown sources अनुमति अन गर्नुहोस्)।'
-                  : 'Open the downloaded .apk file and tap Install on your Android phone.'}
+                  ? 'यो Google Drive मा रहेको छुट्टै .apk फाइल हो (नयाँ लोगो/नामको लागि GitHub Pages बाट नयाँ APK बनाएर Settings मा अपडेट गर्नुहोस्)।'
+                  : 'Downloads the hosted external .apk file (rebuild via PWABuilder after pushing updates to refresh the .apk icon/name).'}
               </p>
             </div>
           )}

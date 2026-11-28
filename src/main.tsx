@@ -4,7 +4,7 @@ import App from './App.tsx';
 import { ErrorBoundary } from './components/common/ErrorBoundary.tsx';
 import './index.css';
 
-if (typeof window !== 'undefined' && import.meta.env.PROD && 'serviceWorker' in navigator) {
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   registerSW({ immediate: true });
 }
 

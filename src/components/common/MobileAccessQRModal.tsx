@@ -154,11 +154,11 @@ export const MobileAccessQRPanel: React.FC<MobileAccessQRPanelProps> = ({
     if (!canNativeShare) return;
     try {
       await navigator.share({
-        title: businessName || 'CAFe Host',
+        title: businessName || 'CAFE HOST',
         text:
           lang === 'ne'
-            ? `${businessName || 'CAFe Host'} मोबाइल वा कम्प्युटरमा खोल्नुहोस् / डाउनलोड गर्नुहोस्:`
-            : `Open or install ${businessName || 'CAFe Host'} on your device:`,
+            ? `${businessName || 'CAFE HOST'} मोबाइल वा कम्प्युटरमा खोल्नुहोस् / डाउनलोड गर्नुहोस्:`
+            : `Open or install ${businessName || 'CAFE HOST'} on your device:`,
         url: targetUrl
       });
     } catch {
@@ -588,7 +588,7 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
           <div className="flex items-center gap-3 min-w-0">
             <img
               src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
-              alt={businessName || 'CAFe Host'}
+              alt={businessName || 'CAFE HOST'}
               referrerPolicy="no-referrer"
               className="h-10 w-10 rounded-xl border border-white/15 bg-slate-900 shrink-0"
             />
@@ -602,7 +602,7 @@ export const MobileAccessQRModal: React.FC<MobileAccessQRModalProps> = ({
                   : 'Mobile Access & App Download QR'}
               </h2>
               <p className="text-xs text-slate-300 truncate">
-                {businessName || 'CAFe Host'}
+                {businessName || 'CAFE HOST'}
                 {' · '}
                 {lang === 'ne' ? 'स्क्यान गरेर तुरुन्तै खोल्नुहोस् / .APK डाउनलोड गर्नुहोस्' : 'Scan to install or download .APK'}
               </p>

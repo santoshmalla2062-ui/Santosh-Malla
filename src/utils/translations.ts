@@ -2,7 +2,7 @@ export type Language = 'ne' | 'en';
 
 export const TRANSLATIONS = {
   ne: {
-    appName: 'CAFe Host',
+    appName: 'CAFE HOST',
     tagline: 'क्याफे, रेस्टुरेन्ट र रिसोर्ट व्यवस्थापन',
     posBilling: 'बिलिङ (POS)',
     tablesRooms: 'टेबल तथा कोठाहरू',
@@ -99,7 +99,7 @@ export const TRANSLATIONS = {
     savedNotice: 'डेटा सुरक्षित (Saved Locally)'
   },
   en: {
-    appName: 'CAFe Host',
+    appName: 'CAFE HOST',
     tagline: 'Cafe, Restaurant & Resort Management',
     posBilling: 'Billing (POS)',
     tablesRooms: 'Tables & Rooms',

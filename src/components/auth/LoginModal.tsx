@@ -74,7 +74,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   staffUsers,
   lang,
-  businessName = 'CAFe Host',
+  businessName = 'CAFE HOST',
   businessLogoUrl,
   onLanguageChange,
   onLoginSuccess,
@@ -560,7 +560,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <div className="h-16 w-16 rounded-2xl bg-slate-900 p-0.5 shadow-md shadow-slate-900/20 flex items-center justify-center overflow-hidden border border-amber-500/30">
                 <img
                   src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
-                  alt={businessName || 'CAFe Host'}
+                  alt={businessName || 'CAFE HOST'}
                   referrerPolicy="no-referrer"
                   className="h-full w-full rounded-xl object-cover"
                 />

@@ -179,7 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
               ) : (
                 <img
                   src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
-                  alt={settings.businessName || 'CAFe Host'}
+                  alt={settings.businessName || 'CAFE HOST'}
                   referrerPolicy="no-referrer"
                   className="h-7 w-7 rounded-lg object-cover border border-slate-200 bg-slate-900 shrink-0"
                 />
